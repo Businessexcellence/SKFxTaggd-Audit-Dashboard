@@ -206,11 +206,7 @@ body { font-family: 'Inter', sans-serif; background: #F7F8FC; color: #172B4D; }
 .upload-status.show { display:block; }
 .upload-status.success { background:#E8F5E9; color:#2E7D32; }
 .upload-status.error { background:#FBE9E7; color:#C62828; }
-.upload-type-tabs { display:flex; gap:8px; margin-bottom:16px; }
-.upload-type-tab { flex:1; padding:10px; border:2px solid var(--skf-border); border-radius:10px; text-align:center; cursor:pointer; font-size:0.82rem; font-weight:600; color:var(--skf-gray); transition:all 0.2s; }
-.upload-type-tab:hover { border-color:var(--skf-blue); color:var(--skf-blue); }
-.upload-type-tab.active { border-color:var(--skf-blue); background:var(--skf-blue-light); color:var(--skf-blue); }
-.upload-type-tab i { display:block; font-size:1.2rem; margin-bottom:4px; }
+
 
 /* Responsive */
 @media (max-width: 1024px) {
@@ -277,24 +273,12 @@ body { font-family: 'Inter', sans-serif; background: #F7F8FC; color: #172B4D; }
 <div class="upload-overlay" id="uploadOverlay">
   <div class="upload-modal">
     <h2><i class="fas fa-file-upload"></i> Upload Excel Data</h2>
-    <p>Upload a new Excel file to override the current dashboard data. The file should match the standard format with "Audit Count" and "Recruiter" sheets.</p>
-    
-    <div class="upload-type-tabs">
-      <div class="upload-type-tab active" id="tabAudit" onclick="setUploadType('audit')">
-        <i class="fas fa-chart-bar"></i> Audit Data
-      </div>
-      <div class="upload-type-tab" id="tabRecruiter" onclick="setUploadType('recruiter')">
-        <i class="fas fa-users"></i> Recruiter Data
-      </div>
-      <div class="upload-type-tab" id="tabBoth" onclick="setUploadType('both')">
-        <i class="fas fa-layer-group"></i> Both Sheets
-      </div>
-    </div>
+    <p>Upload a single Excel file (.xlsx) containing both sheets. The system will auto-detect the <strong>Audit</strong> and <strong>Recruiter</strong> sheets by name.</p>
     
     <div class="upload-drop-zone" id="uploadDropZone">
       <i class="fas fa-cloud-upload-alt"></i>
       <div class="drop-label">Drag & drop your Excel file here</div>
-      <div class="drop-sub">or click to browse (.xlsx, .xls)</div>
+      <div class="drop-sub">or click to browse (.xlsx, .xls) &mdash; file should have Audit &amp; Recruiter sheets</div>
       <input type="file" id="uploadFileInput" accept=".xlsx,.xls" style="display:none;">
     </div>
     
@@ -305,10 +289,10 @@ body { font-family: 'Inter', sans-serif; background: #F7F8FC; color: #172B4D; }
     </div>
     
     <div class="upload-sheet-select" id="uploadSheetSelect">
-      <label>Select Audit Sheet</label>
+      <label>Audit Data Sheet</label>
       <select id="auditSheetDropdown"></select>
       <div style="height:8px;"></div>
-      <label>Select Recruiter Sheet</label>
+      <label>Recruiter Data Sheet</label>
       <select id="recruiterSheetDropdown"></select>
     </div>
     
@@ -316,7 +300,7 @@ body { font-family: 'Inter', sans-serif; background: #F7F8FC; color: #172B4D; }
     
     <div class="upload-actions">
       <button class="btn-cancel" onclick="closeUploadModal()">Cancel</button>
-      <button class="btn-upload" id="btnApplyUpload" onclick="applyUpload()" disabled>Apply Data</button>
+      <button class="btn-upload" id="btnApplyUpload" onclick="applyUpload()" disabled><i class="fas fa-check"></i>&nbsp; Apply &amp; Refresh Dashboard</button>
     </div>
   </div>
 </div>
@@ -503,6 +487,17 @@ const COLORS = {
 };
 
 // ============ AUTH ============
+function doLogout() {
+  currentAccount = null;
+  auditData = []; recruiterData = []; filteredAudit = []; filteredRecruiter = [];
+  Object.keys(charts).forEach(k => { charts[k].destroy(); });
+  charts = {};
+  document.getElementById('loginOverlay').style.display = 'flex';
+  document.getElementById('mainContent').style.display = 'none';
+  document.getElementById('loginPassword').value = '';
+  document.getElementById('loginError').style.display = 'none';
+}
+
 function doLogin() {
   const pw = document.getElementById('loginPassword').value;
   let account = null, label = '';
@@ -1325,27 +1320,18 @@ function renderTable(tableId, headers, rows) {
 }
 
 // ============ EXCEL UPLOAD ============
-let uploadType = 'both';
 let uploadedWorkbook = null;
 let uploadedFile = null;
 
 function openUploadModal() {
   document.getElementById('uploadOverlay').classList.add('show');
   clearUploadFile();
-  setUploadType('both');
   document.getElementById('uploadStatus').classList.remove('show');
 }
 
 function closeUploadModal() {
   document.getElementById('uploadOverlay').classList.remove('show');
   clearUploadFile();
-}
-
-function setUploadType(type) {
-  uploadType = type;
-  document.querySelectorAll('.upload-type-tab').forEach(t => t.classList.remove('active'));
-  document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1)).classList.add('active');
-  updateSheetDropdowns();
 }
 
 function clearUploadFile() {
@@ -1418,20 +1404,18 @@ function updateSheetDropdowns() {
   
   const names = uploadedWorkbook.SheetNames;
   
-  // Auto-detect sheets
+  // Auto-detect sheets by name patterns
   let auditIdx = names.findIndex(n => /audit/i.test(n));
   let recIdx = names.findIndex(n => /recruiter|performance/i.test(n));
+  // Fallback: first sheet = audit, second = recruiter
   if (auditIdx < 0) auditIdx = 0;
   if (recIdx < 0) recIdx = names.length > 1 ? 1 : 0;
   
   auditDD.innerHTML = names.map((n,i) => '<option value="'+i+'" '+(i===auditIdx?'selected':'')+'>'+n+'</option>').join('');
   recDD.innerHTML = names.map((n,i) => '<option value="'+i+'" '+(i===recIdx?'selected':'')+'>'+n+'</option>').join('');
   
-  if (uploadType === 'both' || names.length > 1) {
-    sheetSelect.classList.add('show');
-  } else {
-    sheetSelect.classList.remove('show');
-  }
+  // Always show sheet selection so user can verify/adjust
+  sheetSelect.classList.add('show');
 }
 
 function showUploadStatus(type, msg) {
@@ -1448,58 +1432,50 @@ function applyUpload() {
     const auditSheetIdx = parseInt(document.getElementById('auditSheetDropdown').value);
     const recSheetIdx = parseInt(document.getElementById('recruiterSheetDropdown').value);
     
-    if (uploadType === 'audit' || uploadType === 'both') {
-      const ws = uploadedWorkbook.Sheets[names[auditSheetIdx]];
-      const raw = XLSX.utils.sheet_to_json(ws, { defval: '' });
-      
-      // Clean audit data
-      const cleaned = raw.map(r => {
-        const row = {};
-        Object.keys(r).forEach(k => { row[k.trim()] = r[k]; });
-        return row;
-      });
-      
-      cleaned.forEach(r => {
-        r['Month'] = (r['Month']||'').toString().trim();
-        r['Recruitment Stage'] = (r['Recruitment Stage']||'').toString().trim();
-        r['Parameter'] = (r['Parameter']||'').toString().trim();
-        r['Week'] = (r['Week']||'').toString().trim();
-        r['Finanical Year'] = r['Finanical Year'] || r['Financial Year'] || r['Year'] || '';
-        r['MonthNumber'] = parseInt(r['MonthNumber'] || r['Month Number']) || 0;
-        r['Accuracy Score'] = parseFloat(r['Accuracy Score']) || 0;
-        r['Error %'] = parseFloat(r['Error %'] || r['Error']) || 0;
-        r['Total Population'] = parseInt(r['Total Population']) || 0;
-        r['Opportunity Count'] = parseInt(r['Opportunity Count']) || 0;
-        r['Opportunity Pass'] = parseInt(r['Opportunity Pass']) || 0;
-        r['Opportunity Fail'] = parseInt(r['Opportunity Fail']) || 0;
-        r['Opportunity NA'] = parseInt(r['Opportunity NA']) || 0;
-        r['Sample Count'] = parseFloat(r['Sample Count']) || 0;
-      });
-      
-      auditData = cleaned;
-    }
+    // ---- Read Audit sheet ----
+    const auditWs = uploadedWorkbook.Sheets[names[auditSheetIdx]];
+    const auditRaw = XLSX.utils.sheet_to_json(auditWs, { defval: '' });
+    const auditCleaned = auditRaw.map(r => {
+      const row = {};
+      Object.keys(r).forEach(k => { row[k.trim()] = r[k]; });
+      return row;
+    });
+    auditCleaned.forEach(r => {
+      r['Month'] = (r['Month']||'').toString().trim();
+      r['Recruitment Stage'] = (r['Recruitment Stage']||'').toString().trim();
+      r['Parameter'] = (r['Parameter']||'').toString().trim();
+      r['Week'] = (r['Week']||'').toString().trim();
+      r['Finanical Year'] = r['Finanical Year'] || r['Financial Year'] || r['Year'] || '';
+      r['MonthNumber'] = parseInt(r['MonthNumber'] || r['Month Number']) || 0;
+      r['Accuracy Score'] = parseFloat(r['Accuracy Score']) || 0;
+      r['Error %'] = parseFloat(r['Error %'] || r['Error']) || 0;
+      r['Total Population'] = parseInt(r['Total Population']) || 0;
+      r['Opportunity Count'] = parseInt(r['Opportunity Count']) || 0;
+      r['Opportunity Pass'] = parseInt(r['Opportunity Pass']) || 0;
+      r['Opportunity Fail'] = parseInt(r['Opportunity Fail']) || 0;
+      r['Opportunity NA'] = parseInt(r['Opportunity NA']) || 0;
+      r['Sample Count'] = parseFloat(r['Sample Count']) || 0;
+    });
+    auditData = auditCleaned;
     
-    if (uploadType === 'recruiter' || uploadType === 'both') {
-      const ws = uploadedWorkbook.Sheets[names[recSheetIdx]];
-      const raw = XLSX.utils.sheet_to_json(ws, { defval: '' });
-      
-      const cleaned = raw.map(r => {
-        const row = {};
-        Object.keys(r).forEach(k => { row[k.trim()] = r[k]; });
-        return row;
-      });
-      
-      cleaned.forEach(r => {
-        r['Month'] = (r['Month '] || r['Month'] || '').toString().trim();
-        r['Recruiter Name'] = (r['Recruiter Name']||'').toString().trim();
-        r['Parameter'] = (r['Parameter '] || r['Parameter'] || '').toString().trim();
-        r['Week'] = (r['Week']||'').toString().trim();
-        r['Financial Year'] = r['Financial Year'] || r['Finanical Year'] || r['Year'] || '';
-        r['Audit Score'] = parseFloat(r['Audit Score']) || 0;
-      });
-      
-      recruiterData = cleaned;
-    }
+    // ---- Read Recruiter sheet ----
+    const recWs = uploadedWorkbook.Sheets[names[recSheetIdx]];
+    const recRaw = XLSX.utils.sheet_to_json(recWs, { defval: '' });
+    const recCleaned = recRaw.map(r => {
+      const row = {};
+      Object.keys(r).forEach(k => { row[k.trim()] = r[k]; });
+      return row;
+    });
+    recCleaned.forEach(r => {
+      r['Month'] = (r['Month '] || r['Month'] || '').toString().trim();
+      r['Recruiter Name'] = (r['Recruiter Name']||'').toString().trim();
+      r['Parameter'] = (r['Parameter '] || r['Parameter'] || '').toString().trim();
+      r['Week'] = (r['Week']||'').toString().trim();
+      r['Financial Year'] = r['Financial Year'] || r['Finanical Year'] || r['Year'] || '';
+      r['Audit Score'] = parseFloat(r['Audit Score']) || 0;
+      r['Program Manager'] = (r['Program Manager']||'').toString().trim();
+    });
+    recruiterData = recCleaned;
     
     // Refresh dashboard
     initFilters();
@@ -1507,9 +1483,9 @@ function applyUpload() {
     
     document.getElementById('lastUpdated').textContent = 'Uploaded ' + new Date().toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) + ' ' + new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
     
-    showUploadStatus('success', 'Data applied successfully! Dashboard updated with ' + (uploadType === 'both' ? 'audit (' + auditData.length + ' rows) and recruiter (' + recruiterData.length + ' rows)' : uploadType === 'audit' ? auditData.length + ' audit rows' : recruiterData.length + ' recruiter rows') + '.');
+    showUploadStatus('success', 'Dashboard updated! Audit: ' + auditData.length + ' rows (from "' + names[auditSheetIdx] + '"), Recruiter: ' + recruiterData.length + ' rows (from "' + names[recSheetIdx] + '").');
     
-    setTimeout(() => closeUploadModal(), 1500);
+    setTimeout(() => closeUploadModal(), 2000);
     
   } catch(err) {
     showUploadStatus('error', 'Error processing data: ' + err.message);
