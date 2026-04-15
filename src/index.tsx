@@ -1,12 +1,1294 @@
 import { Hono } from 'hono'
-import { renderer } from './renderer'
+import { cors } from 'hono/cors'
+
+// Import data
+import { autoAuditData, autoRecruiterData, indAuditData, indRecruiterData } from './data'
 
 const app = new Hono()
 
-app.use(renderer)
+app.use('/api/*', cors())
 
-app.get('/', (c) => {
-  return c.render(<h1>Hello!</h1>)
+// Auth endpoint
+app.post('/api/auth', async (c) => {
+  const { password } = await c.req.json()
+  if (password === 'Skfauto@321') {
+    return c.json({ success: true, account: 'auto', label: 'SKF Automotive' })
+  } else if (password === 'Skfind@123') {
+    return c.json({ success: true, account: 'industrial', label: 'SKF Industrial' })
+  }
+  return c.json({ success: false, message: 'Invalid password' }, 401)
 })
+
+// Data endpoints
+app.get('/api/data/audit', (c) => {
+  const account = c.req.query('account')
+  if (account === 'auto') return c.json(autoAuditData)
+  if (account === 'industrial') return c.json(indAuditData)
+  return c.json({ error: 'Invalid account' }, 400)
+})
+
+app.get('/api/data/recruiter', (c) => {
+  const account = c.req.query('account')
+  if (account === 'auto') return c.json(autoRecruiterData)
+  if (account === 'industrial') return c.json(indRecruiterData)
+  return c.json({ error: 'Invalid account' }, 400)
+})
+
+// Serve favicon
+app.get('/favicon.svg', (c) => {
+  return new Response('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#0054A6"/><text x="16" y="22" font-family="Arial" font-size="16" font-weight="bold" fill="white" text-anchor="middle">S</text></svg>', {
+    headers: { 'Content-Type': 'image/svg+xml' }
+  })
+})
+
+// Main dashboard page
+app.get('/', (c) => {
+  return c.html(dashboardHTML)
+})
+
+const dashboardHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SKF Recruitment Audit Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+:root {
+  --skf-blue: #0054A6;
+  --skf-blue-dark: #003D7A;
+  --skf-blue-light: #E8F0FE;
+  --skf-teal: #007C92;
+  --skf-green: #00875A;
+  --skf-red: #DE350B;
+  --skf-yellow: #FF991F;
+  --skf-gray: #6B778C;
+  --skf-gray-light: #F4F5F7;
+  --skf-border: #DFE1E6;
+  --sidebar-w: 240px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: 'Inter', sans-serif; background: #F7F8FC; color: #172B4D; }
+
+/* LOGIN */
+.login-overlay { position:fixed; inset:0; z-index:9999; background: linear-gradient(135deg, #0054A6 0%, #003D7A 50%, #007C92 100%); display:flex; align-items:center; justify-content:center; }
+.login-card { background: #fff; border-radius: 16px; padding: 48px 40px; width: 400px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+.login-card h1 { font-size: 1.5rem; font-weight: 700; color: var(--skf-blue); margin-bottom: 8px; }
+.login-card p { color: var(--skf-gray); font-size: 0.875rem; margin-bottom: 24px; }
+.login-input { width:100%; padding: 12px 16px; border: 2px solid var(--skf-border); border-radius: 10px; font-size: 0.95rem; outline:none; transition: border-color 0.2s; }
+.login-input:focus { border-color: var(--skf-blue); }
+.login-btn { width:100%; padding: 13px; background: var(--skf-blue); color:#fff; border:none; border-radius:10px; font-size:1rem; font-weight:600; cursor:pointer; margin-top:16px; transition: background 0.2s; }
+.login-btn:hover { background: var(--skf-blue-dark); }
+.login-error { color: var(--skf-red); font-size: 0.8rem; margin-top: 8px; display: none; }
+
+/* SIDEBAR */
+.sidebar {
+  position: fixed; left: 0; top: 0; bottom: 0; width: var(--sidebar-w);
+  background: linear-gradient(180deg, #0054A6 0%, #003D7A 100%);
+  z-index: 100; display: flex; flex-direction: column; transition: transform 0.3s;
+}
+.sidebar-brand { padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,0.12); }
+.sidebar-brand h2 { color: #fff; font-size: 1.1rem; font-weight: 700; letter-spacing: 0.5px; }
+.sidebar-brand span { color: rgba(255,255,255,0.65); font-size: 0.72rem; display: block; margin-top: 2px; }
+.sidebar-nav { flex:1; padding: 12px 0; overflow-y: auto; }
+.nav-item {
+  display: flex; align-items: center; padding: 11px 20px; color: rgba(255,255,255,0.75);
+  cursor: pointer; font-size: 0.85rem; font-weight: 500; transition: all 0.2s; gap: 12px;
+  border-left: 3px solid transparent; margin: 1px 0;
+}
+.nav-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.nav-item.active { background: rgba(255,255,255,0.15); color: #fff; border-left-color: #fff; }
+.nav-item i { width: 20px; text-align: center; font-size: 0.95rem; }
+.sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.12); }
+.sidebar-footer button {
+  width:100%; padding: 9px; background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.85);
+  border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; cursor: pointer; font-size: 0.8rem;
+  font-weight: 500; transition: all 0.2s;
+}
+.sidebar-footer button:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+/* MAIN CONTENT */
+.main { margin-left: var(--sidebar-w); min-height: 100vh; }
+.topbar { background: #fff; padding: 14px 28px; border-bottom: 1px solid var(--skf-border); display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:50; }
+.topbar h1 { font-size: 1.15rem; font-weight: 700; color: var(--skf-blue); }
+.topbar-right { display:flex; align-items:center; gap: 12px; }
+.account-badge { padding: 5px 14px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+.account-auto { background: #E3F2FD; color: #1565C0; }
+.account-industrial { background: #E8F5E9; color: #2E7D32; }
+
+/* FILTERS BAR */
+.filters-bar {
+  background: #fff; padding: 14px 28px; border-bottom: 1px solid var(--skf-border);
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;
+}
+.filter-group { display: flex; flex-direction: column; gap: 4px; min-width: 160px; position: relative; }
+.filter-group label { font-size: 0.7rem; font-weight: 600; color: var(--skf-gray); text-transform: uppercase; letter-spacing: 0.5px; }
+.multi-select-btn {
+  padding: 7px 12px; border: 1.5px solid var(--skf-border); border-radius: 8px; background: #fff;
+  font-size: 0.82rem; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; min-height: 36px; color: #172B4D; transition: border-color 0.2s;
+}
+.multi-select-btn:hover { border-color: var(--skf-blue); }
+.multi-select-btn.active { border-color: var(--skf-blue); box-shadow: 0 0 0 2px rgba(0,84,166,0.12); }
+.multi-select-dropdown {
+  position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1.5px solid var(--skf-border);
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 200; max-height: 260px;
+  overflow-y: auto; display: none; margin-top: 4px;
+}
+.multi-select-dropdown.show { display: block; }
+.ms-option { padding: 8px 12px; display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.82rem; transition: background 0.15s; }
+.ms-option:hover { background: var(--skf-blue-light); }
+.ms-option input { accent-color: var(--skf-blue); }
+.ms-select-all { border-bottom: 1px solid var(--skf-border); font-weight: 600; color: var(--skf-blue); }
+.filter-reset { padding: 7px 16px; background: var(--skf-gray-light); border: 1.5px solid var(--skf-border); border-radius: 8px; cursor: pointer; font-size: 0.82rem; font-weight: 500; color: var(--skf-gray); transition: all 0.2s; align-self: flex-end; }
+.filter-reset:hover { background: #e0e0e0; }
+
+/* AI INSIGHTS */
+.ai-insights {
+  margin: 16px 28px 0; padding: 16px 20px; background: linear-gradient(135deg, #E8F0FE 0%, #E0F7FA 100%);
+  border-radius: 12px; border: 1px solid #B3D4FC;
+}
+.ai-insights-title { font-size: 0.8rem; font-weight: 700; color: var(--skf-blue); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.ai-insights-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+.ai-card {
+  background: #fff; padding: 12px 14px; border-radius: 8px; border-left: 3px solid var(--skf-blue);
+  font-size: 0.8rem; line-height: 1.5; color: #333;
+}
+.ai-card.warning { border-left-color: var(--skf-yellow); }
+.ai-card.success { border-left-color: var(--skf-green); }
+.ai-card.danger { border-left-color: var(--skf-red); }
+.ai-card strong { color: var(--skf-blue); }
+
+/* CONTENT */
+.content-area { padding: 20px 28px 40px; }
+.section-title { font-size: 1.05rem; font-weight: 700; color: #172B4D; margin-bottom: 16px; display:flex; align-items:center; gap:8px; }
+
+/* KPI CARDS */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.kpi-card {
+  background: #fff; border-radius: 12px; padding: 18px; border: 1px solid var(--skf-border);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04); transition: transform 0.2s, box-shadow 0.2s;
+}
+.kpi-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.kpi-label { font-size: 0.72rem; font-weight: 600; color: var(--skf-gray); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.kpi-value { font-size: 1.8rem; font-weight: 800; color: var(--skf-blue); line-height: 1.1; }
+.kpi-sub { font-size: 0.75rem; color: var(--skf-gray); margin-top: 4px; }
+.kpi-trend { display:inline-flex; align-items:center; gap:4px; font-size:0.75rem; font-weight:600; padding: 2px 8px; border-radius: 12px; margin-top: 4px; }
+.kpi-trend.up { background: #E8F5E9; color: #2E7D32; }
+.kpi-trend.down { background: #FBE9E7; color: #C62828; }
+.kpi-trend.neutral { background: #FFF8E1; color: #F57F17; }
+
+/* CHART CONTAINERS */
+.charts-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 20px; }
+.chart-card {
+  background: #fff; border-radius: 12px; padding: 20px; border: 1px solid var(--skf-border);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.chart-card.full-width { grid-column: 1 / -1; }
+.chart-title { font-size: 0.85rem; font-weight: 700; color: #172B4D; margin-bottom: 14px; display:flex; align-items:center; gap: 6px; }
+.chart-canvas-wrap { position: relative; height: 300px; }
+.chart-canvas-wrap.short { height: 260px; }
+.chart-canvas-wrap.tall { height: 380px; }
+
+/* DATA TABLE */
+.data-table-wrap { overflow-x: auto; background: #fff; border-radius: 12px; border: 1px solid var(--skf-border); box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+.data-table { width:100%; border-collapse: collapse; font-size: 0.8rem; }
+.data-table th { background: var(--skf-blue); color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+.data-table td { padding: 9px 14px; border-bottom: 1px solid #F0F0F0; white-space: nowrap; }
+.data-table tr:hover { background: var(--skf-blue-light); }
+.score-badge { padding: 3px 10px; border-radius: 12px; font-weight: 600; font-size: 0.75rem; }
+.score-high { background: #E8F5E9; color: #2E7D32; }
+.score-mid { background: #FFF8E1; color: #F57F17; }
+.score-low { background: #FBE9E7; color: #C62828; }
+
+/* VIEW SECTIONS */
+.view-section { display: none; }
+.view-section.active { display: block; }
+
+/* SCROLLBAR */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #C1C7D0; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #A5ADBA; }
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .charts-grid { grid-template-columns: 1fr; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+  .sidebar { transform: translateX(-100%); }
+  .sidebar.open { transform: translateX(0); }
+  .main { margin-left: 0; }
+  .kpi-grid { grid-template-columns: 1fr; }
+  .filters-bar { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN OVERLAY -->
+<div id="loginOverlay" class="login-overlay">
+  <div class="login-card">
+    <div style="text-align:center; margin-bottom: 20px;">
+      <div style="width:56px;height:56px;background:var(--skf-blue);border-radius:14px;display:inline-flex;align-items:center;justify-content:center;">
+        <i class="fas fa-chart-line" style="color:#fff;font-size:1.5rem;"></i>
+      </div>
+    </div>
+    <h1 style="text-align:center;">SKF Audit Dashboard</h1>
+    <p style="text-align:center;">Enter your account password to access the dashboard</p>
+    <input type="password" id="loginPassword" class="login-input" placeholder="Enter password..." onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="login-btn" onclick="doLogin()"><i class="fas fa-sign-in-alt"></i>&nbsp; Access Dashboard</button>
+    <div id="loginError" class="login-error"><i class="fas fa-exclamation-circle"></i> Invalid password. Please try again.</div>
+  </div>
+</div>
+
+<!-- SIDEBAR -->
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <h2><i class="fas fa-cog" style="margin-right:6px;"></i> SKF</h2>
+    <span id="sidebarAccountLabel">Recruitment Audit</span>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-item active" data-view="overall" onclick="switchView('overall')">
+      <i class="fas fa-tachometer-alt"></i> Overall View
+    </div>
+    <div class="nav-item" data-view="monthly" onclick="switchView('monthly')">
+      <i class="fas fa-calendar-alt"></i> Monthly View
+    </div>
+    <div class="nav-item" data-view="yearly" onclick="switchView('yearly')">
+      <i class="fas fa-chart-bar"></i> Yearly View
+    </div>
+    <div class="nav-item" data-view="recruiter" onclick="switchView('recruiter')">
+      <i class="fas fa-users"></i> Recruiter Performance
+    </div>
+    <div class="nav-item" data-view="parameter" onclick="switchView('parameter')">
+      <i class="fas fa-clipboard-check"></i> Parameter View
+    </div>
+  </div>
+  <div class="sidebar-footer">
+    <button onclick="doLogout()"><i class="fas fa-sign-out-alt"></i>&nbsp; Logout</button>
+  </div>
+</nav>
+
+<!-- MAIN -->
+<div class="main" id="mainContent" style="display:none;">
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <button onclick="document.getElementById('sidebar').classList.toggle('open')" style="display:none;background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--skf-blue);" class="mobile-menu"><i class="fas fa-bars"></i></button>
+      <h1 id="pageTitle">Overall View</h1>
+    </div>
+    <div class="topbar-right">
+      <span id="accountBadge" class="account-badge"></span>
+      <span style="font-size:0.8rem;color:var(--skf-gray);"><i class="fas fa-clock"></i> <span id="lastUpdated"></span></span>
+    </div>
+  </div>
+
+  <!-- FILTERS BAR -->
+  <div class="filters-bar" id="filtersBar">
+    <div class="filter-group" id="filterYear"></div>
+    <div class="filter-group" id="filterMonth"></div>
+    <div class="filter-group" id="filterWeek"></div>
+    <div class="filter-group" id="filterStage"></div>
+    <div class="filter-group" id="filterParameter"></div>
+    <div class="filter-group" id="filterRecruiter" style="display:none;"></div>
+    <button class="filter-reset" onclick="resetFilters()"><i class="fas fa-undo"></i>&nbsp; Reset</button>
+  </div>
+
+  <!-- AI INSIGHTS -->
+  <div class="ai-insights" id="aiInsights">
+    <div class="ai-insights-title"><i class="fas fa-robot"></i> Deep AI Insights</div>
+    <div class="ai-insights-grid" id="aiInsightsContent"></div>
+  </div>
+
+  <!-- VIEW: OVERALL -->
+  <div class="view-section active" id="view-overall">
+    <div class="content-area">
+      <div class="kpi-grid" id="overallKpis"></div>
+      <div class="charts-grid">
+        <div class="chart-card full-width">
+          <div class="chart-title"><i class="fas fa-chart-line" style="color:var(--skf-blue);"></i> Accuracy Score Trend</div>
+          <div class="chart-canvas-wrap tall"><canvas id="trendChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title"><i class="fas fa-chart-pie" style="color:var(--skf-teal);"></i> Pass / Fail / NA Distribution</div>
+          <div class="chart-canvas-wrap"><canvas id="passFailChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title"><i class="fas fa-layer-group" style="color:var(--skf-blue);"></i> Accuracy by Recruitment Stage</div>
+          <div class="chart-canvas-wrap"><canvas id="stageChart"></canvas></div>
+        </div>
+        <div class="chart-card full-width">
+          <div class="chart-title"><i class="fas fa-chart-area" style="color:var(--skf-green);"></i> Error % Trend Over Time</div>
+          <div class="chart-canvas-wrap"><canvas id="errorTrendChart"></canvas></div>
+        </div>
+      </div>
+      <div class="section-title" style="margin-top:8px;"><i class="fas fa-table" style="color:var(--skf-blue);"></i> Detailed Audit Data</div>
+      <div class="data-table-wrap"><table class="data-table" id="overallTable"></table></div>
+    </div>
+  </div>
+
+  <!-- VIEW: MONTHLY -->
+  <div class="view-section" id="view-monthly">
+    <div class="content-area">
+      <div class="kpi-grid" id="monthlyKpis"></div>
+      <div class="charts-grid">
+        <div class="chart-card full-width">
+          <div class="chart-title"><i class="fas fa-calendar-alt" style="color:var(--skf-blue);"></i> Monthly Accuracy Comparison</div>
+          <div class="chart-canvas-wrap tall"><canvas id="monthlyBarChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title"><i class="fas fa-chart-bar" style="color:var(--skf-teal);"></i> Monthly Sample Count</div>
+          <div class="chart-canvas-wrap"><canvas id="monthlySampleChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title"><i class="fas fa-chart-line" style="color:var(--skf-green);"></i> Monthly Error % Trend</div>
+          <div class="chart-canvas-wrap"><canvas id="monthlyErrorChart"></canvas></div>
+        </div>
+      </div>
+      <div class="section-title" style="margin-top:8px;"><i class="fas fa-table" style="color:var(--skf-blue);"></i> Monthly Breakdown</div>
+      <div class="data-table-wrap"><table class="data-table" id="monthlyTable"></table></div>
+    </div>
+  </div>
+
+  <!-- VIEW: YEARLY -->
+  <div class="view-section" id="view-yearly">
+    <div class="content-area">
+      <div class="kpi-grid" id="yearlyKpis"></div>
+      <div class="charts-grid">
+        <div class="chart-card full-width">
+          <div class="chart-title"><i class="fas fa-chart-bar" style="color:var(--skf-blue);"></i> Yearly Accuracy by Stage</div>
+          <div class="chart-canvas-wrap tall"><canvas id="yearlyStageChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title"><i class="fas fa-chart-pie" style="color:var(--skf-teal);"></i> Yearly Pass/Fail Distribution</div>
+          <div class="chart-canvas-wrap"><canvas id="yearlyPieChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title"><i class="fas fa-bullseye" style="color:var(--skf-green);"></i> Yearly Population vs Sample</div>
+          <div class="chart-canvas-wrap"><canvas id="yearlyPopChart"></canvas></div>
+        </div>
+      </div>
+      <div class="section-title" style="margin-top:8px;"><i class="fas fa-table" style="color:var(--skf-blue);"></i> Yearly Summary</div>
+      <div class="data-table-wrap"><table class="data-table" id="yearlyTable"></table></div>
+    </div>
+  </div>
+
+  <!-- VIEW: RECRUITER -->
+  <div class="view-section" id="view-recruiter">
+    <div class="content-area">
+      <div class="kpi-grid" id="recruiterKpis"></div>
+      <div class="charts-grid">
+        <div class="chart-card full-width">
+          <div class="chart-title"><i class="fas fa-users" style="color:var(--skf-blue);"></i> Recruiter Average Audit Score</div>
+          <div class="chart-canvas-wrap tall"><canvas id="recruiterBarChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title"><i class="fas fa-chart-radar" style="color:var(--skf-teal);"></i> Recruiter Score by Parameter</div>
+          <div class="chart-canvas-wrap tall"><canvas id="recruiterRadarChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title"><i class="fas fa-chart-line" style="color:var(--skf-green);"></i> Recruiter Monthly Trend</div>
+          <div class="chart-canvas-wrap tall"><canvas id="recruiterTrendChart"></canvas></div>
+        </div>
+      </div>
+      <div class="section-title" style="margin-top:8px;"><i class="fas fa-table" style="color:var(--skf-blue);"></i> Recruiter Detail</div>
+      <div class="data-table-wrap"><table class="data-table" id="recruiterTable"></table></div>
+    </div>
+  </div>
+
+  <!-- VIEW: PARAMETER -->
+  <div class="view-section" id="view-parameter">
+    <div class="content-area">
+      <div class="kpi-grid" id="parameterKpis"></div>
+      <div class="charts-grid">
+        <div class="chart-card full-width">
+          <div class="chart-title"><i class="fas fa-clipboard-check" style="color:var(--skf-blue);"></i> Parameter-wise Accuracy</div>
+          <div class="chart-canvas-wrap tall"><canvas id="paramBarChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title"><i class="fas fa-chart-area" style="color:var(--skf-teal);"></i> Parameter Error % Comparison</div>
+          <div class="chart-canvas-wrap"><canvas id="paramErrorChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title"><i class="fas fa-chart-pie" style="color:var(--skf-green);"></i> Parameter Pass Rate</div>
+          <div class="chart-canvas-wrap"><canvas id="paramPieChart"></canvas></div>
+        </div>
+      </div>
+      <div class="section-title" style="margin-top:8px;"><i class="fas fa-table" style="color:var(--skf-blue);"></i> Parameter Detail</div>
+      <div class="data-table-wrap"><table class="data-table" id="parameterTable"></table></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============ GLOBALS ============
+let currentAccount = null;
+let auditData = [];
+let recruiterData = [];
+let filteredAudit = [];
+let filteredRecruiter = [];
+let charts = {};
+let activeFilters = { year: [], month: [], week: [], stage: [], parameter: [], recruiter: [] };
+
+const MONTH_ORDER = ['Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep'];
+const MONTH_SORT = {};
+MONTH_ORDER.forEach((m,i) => MONTH_SORT[m.trim()] = i);
+
+const COLORS = {
+  blue: '#0054A6', teal: '#007C92', green: '#00875A', red: '#DE350B',
+  yellow: '#FF991F', purple: '#6554C0', navy: '#003D7A',
+  palette: ['#0054A6','#007C92','#00875A','#FF991F','#DE350B','#6554C0','#0073B1','#36B37E','#FF5630','#5243AA','#00A3BF','#ABB3BB']
+};
+
+// ============ AUTH ============
+async function doLogin() {
+  const pw = document.getElementById('loginPassword').value;
+  try {
+    const res = await fetch('/api/auth', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({password: pw}) });
+    const data = await res.json();
+    if (data.success) {
+      currentAccount = data.account;
+      document.getElementById('loginOverlay').style.display = 'none';
+      document.getElementById('mainContent').style.display = 'block';
+      document.getElementById('sidebarAccountLabel').textContent = data.label;
+      document.getElementById('accountBadge').textContent = data.label;
+      document.getElementById('accountBadge').className = 'account-badge ' + (data.account === 'auto' ? 'account-auto' : 'account-industrial');
+      document.getElementById('lastUpdated').textContent = new Date().toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'});
+      await loadData();
+    } else {
+      document.getElementById('loginError').style.display = 'block';
+    }
+  } catch(e) {
+    document.getElementById('loginError').style.display = 'block';
+  }
+}
+
+function doLogout() {
+  currentAccount = null;
+  auditData = []; recruiterData = [];
+  document.getElementById('loginOverlay').style.display = 'flex';
+  document.getElementById('mainContent').style.display = 'none';
+  document.getElementById('loginPassword').value = '';
+  document.getElementById('loginError').style.display = 'none';
+  Object.values(charts).forEach(c => { if(c) c.destroy(); });
+  charts = {};
+}
+
+// ============ DATA LOADING ============
+async function loadData() {
+  const [auditRes, recRes] = await Promise.all([
+    fetch('/api/data/audit?account=' + currentAccount),
+    fetch('/api/data/recruiter?account=' + currentAccount)
+  ]);
+  auditData = await auditRes.json();
+  recruiterData = await recRes.json();
+  // Clean data
+  auditData.forEach(r => {
+    r['Month'] = (r['Month']||'').toString().trim();
+    r['Recruitment Stage'] = (r['Recruitment Stage']||'').toString().trim();
+    r['Parameter'] = (r['Parameter']||'').toString().trim();
+    r['Week'] = (r['Week']||'').toString().trim();
+    r['Accuracy Score'] = parseFloat(r['Accuracy Score']) || 0;
+    r['Error %'] = parseFloat(r['Error %']) || 0;
+    r['Total Population'] = parseInt(r['Total Population']) || 0;
+    r['Opportunity Count'] = parseInt(r['Opportunity Count']) || 0;
+    r['Opportunity Pass'] = parseInt(r['Opportunity Pass']) || 0;
+    r['Opportunity Fail'] = parseInt(r['Opportunity Fail']) || 0;
+    r['Opportunity NA'] = parseInt(r['Opportunity NA']) || 0;
+    r['Sample Count'] = parseFloat(r['Sample Count']) || 0;
+  });
+  recruiterData.forEach(r => {
+    r['Month'] = (r['Month ']||r['Month']||'').toString().trim();
+    r['Recruiter Name'] = (r['Recruiter Name']||'').toString().trim();
+    r['Parameter'] = (r['Parameter ']||r['Parameter']||'').toString().trim();
+    r['Week'] = (r['Week']||'').toString().trim();
+    r['Audit Score'] = parseFloat(r['Audit Score']) || 0;
+    r['Financial Year'] = r['Financial Year'];
+  });
+  
+  initFilters();
+  applyFilters();
+}
+
+// ============ MULTI-SELECT FILTERS ============
+function initFilters() {
+  const years = [...new Set(auditData.map(r => r['Finanical Year']))].sort();
+  const months = [...new Set(auditData.map(r => r['Month']))].sort((a,b) => (MONTH_SORT[a]||99) - (MONTH_SORT[b]||99));
+  const weeks = [...new Set(auditData.map(r => r['Week']))].sort();
+  const stages = [...new Set(auditData.map(r => r['Recruitment Stage']))];
+  const params = [...new Set(auditData.map(r => r['Parameter']))];
+  const recruiters = [...new Set(recruiterData.map(r => r['Recruiter Name']))].sort();
+
+  activeFilters = { year: [...years], month: [...months], week: [...weeks], stage: [...stages], parameter: [...params], recruiter: [...recruiters] };
+
+  createMultiSelect('filterYear', 'Financial Year', years.map(String), 'year');
+  createMultiSelect('filterMonth', 'Month', months, 'month');
+  createMultiSelect('filterWeek', 'Week', weeks, 'week');
+  createMultiSelect('filterStage', 'Recruitment Stage', stages, 'stage');
+  createMultiSelect('filterParameter', 'Parameter', params, 'parameter');
+  createMultiSelect('filterRecruiter', 'Recruiter', recruiters, 'recruiter');
+}
+
+function createMultiSelect(containerId, label, options, filterKey) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  const lbl = document.createElement('label');
+  lbl.textContent = label;
+  container.appendChild(lbl);
+
+  const btn = document.createElement('div');
+  btn.className = 'multi-select-btn';
+  btn.innerHTML = '<span>All Selected</span><i class="fas fa-chevron-down" style="font-size:0.65rem;color:#999;"></i>';
+  container.appendChild(btn);
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'multi-select-dropdown';
+
+  // Select All
+  const selAll = document.createElement('div');
+  selAll.className = 'ms-option ms-select-all';
+  selAll.innerHTML = '<input type="checkbox" checked> Select All';
+  selAll.onclick = (e) => {
+    const checked = selAll.querySelector('input').checked;
+    dropdown.querySelectorAll('.ms-option:not(.ms-select-all) input').forEach(cb => cb.checked = checked);
+    activeFilters[filterKey] = checked ? [...options] : [];
+    updateFilterLabel(btn, activeFilters[filterKey], options);
+    cascadeFilters(filterKey);
+    applyFilters();
+  };
+  dropdown.appendChild(selAll);
+
+  options.forEach(opt => {
+    const div = document.createElement('div');
+    div.className = 'ms-option';
+    div.innerHTML = '<input type="checkbox" checked> ' + opt;
+    div.onclick = (e) => {
+      if (e.target.tagName !== 'INPUT') div.querySelector('input').checked = !div.querySelector('input').checked;
+      const cb = div.querySelector('input');
+      if (cb.checked) { if (!activeFilters[filterKey].includes(opt)) activeFilters[filterKey].push(opt); }
+      else { activeFilters[filterKey] = activeFilters[filterKey].filter(v => v !== opt); }
+      selAll.querySelector('input').checked = activeFilters[filterKey].length === options.length;
+      updateFilterLabel(btn, activeFilters[filterKey], options);
+      cascadeFilters(filterKey);
+      applyFilters();
+    };
+    dropdown.appendChild(div);
+  });
+
+  container.appendChild(dropdown);
+
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.multi-select-dropdown.show').forEach(d => { if(d!==dropdown) d.classList.remove('show'); });
+    dropdown.classList.toggle('show');
+    btn.classList.toggle('active', dropdown.classList.contains('show'));
+  };
+}
+
+function updateFilterLabel(btn, selected, allOptions) {
+  const span = btn.querySelector('span');
+  if (selected.length === allOptions.length) span.textContent = 'All Selected';
+  else if (selected.length === 0) span.textContent = 'None';
+  else if (selected.length <= 2) span.textContent = selected.join(', ');
+  else span.textContent = selected.length + ' selected';
+}
+
+function cascadeFilters(changedKey) {
+  // Cascading: year -> month -> week -> stage -> parameter
+  // When a higher filter changes, update lower filter options
+  if (changedKey === 'year' || changedKey === 'month') {
+    let tempData = auditData.filter(r =>
+      activeFilters.year.includes(String(r['Finanical Year'])) &&
+      (changedKey === 'year' ? true : activeFilters.month.includes(r['Month']))
+    );
+    if (changedKey === 'year') {
+      const availMonths = [...new Set(tempData.map(r => r['Month']))];
+      activeFilters.month = activeFilters.month.filter(m => availMonths.includes(m));
+    }
+  }
+}
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.multi-select-dropdown.show').forEach(d => d.classList.remove('show'));
+  document.querySelectorAll('.multi-select-btn.active').forEach(b => b.classList.remove('active'));
+});
+
+function resetFilters() {
+  initFilters();
+  applyFilters();
+}
+
+// ============ APPLY FILTERS ============
+function applyFilters() {
+  filteredAudit = auditData.filter(r =>
+    activeFilters.year.includes(String(r['Finanical Year'])) &&
+    activeFilters.month.includes(r['Month']) &&
+    activeFilters.week.includes(r['Week']) &&
+    activeFilters.stage.includes(r['Recruitment Stage']) &&
+    activeFilters.parameter.includes(r['Parameter'])
+  );
+  filteredRecruiter = recruiterData.filter(r =>
+    activeFilters.year.includes(String(r['Financial Year'])) &&
+    activeFilters.month.includes(r['Month']) &&
+    activeFilters.recruiter.includes(r['Recruiter Name']) &&
+    activeFilters.parameter.includes(r['Parameter'])
+  );
+
+  renderCurrentView();
+}
+
+// ============ VIEW SWITCHING ============
+function switchView(view) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelector('.nav-item[data-view="'+view+'"]').classList.add('active');
+  document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('view-'+view).classList.add('active');
+
+  const titles = { overall:'Overall View', monthly:'Monthly View', yearly:'Yearly View', recruiter:'Recruiter Performance', parameter:'Parameter View' };
+  document.getElementById('pageTitle').textContent = titles[view];
+
+  // Show recruiter filter only on recruiter view
+  document.getElementById('filterRecruiter').style.display = view === 'recruiter' ? '' : 'none';
+
+  renderCurrentView();
+}
+
+function renderCurrentView() {
+  const active = document.querySelector('.view-section.active');
+  const view = active.id.replace('view-','');
+  generateAIInsights(view);
+  
+  if (view === 'overall') renderOverall();
+  else if (view === 'monthly') renderMonthly();
+  else if (view === 'yearly') renderYearly();
+  else if (view === 'recruiter') renderRecruiter();
+  else if (view === 'parameter') renderParameter();
+}
+
+// ============ AI INSIGHTS ENGINE ============
+function generateAIInsights(view) {
+  const container = document.getElementById('aiInsightsContent');
+  const insights = [];
+  
+  if (filteredAudit.length === 0) {
+    container.innerHTML = '<div class="ai-card">No data available for the selected filters. Please adjust your filters.</div>';
+    return;
+  }
+
+  const avgAccuracy = filteredAudit.reduce((s,r) => s + r['Accuracy Score'], 0) / filteredAudit.length;
+  const avgError = filteredAudit.reduce((s,r) => s + r['Error %'], 0) / filteredAudit.length;
+  const totalPass = filteredAudit.reduce((s,r) => s + r['Opportunity Pass'], 0);
+  const totalFail = filteredAudit.reduce((s,r) => s + r['Opportunity Fail'], 0);
+  const totalOpp = filteredAudit.reduce((s,r) => s + r['Opportunity Count'], 0);
+
+  // Overall accuracy insight
+  if (avgAccuracy >= 0.95) {
+    insights.push({ type: 'success', text: '<strong>Excellent Performance!</strong> Overall accuracy score is <strong>' + (avgAccuracy*100).toFixed(1) + '%</strong>, well above the 95% benchmark. The audit process is highly effective.' });
+  } else if (avgAccuracy >= 0.80) {
+    insights.push({ type: 'warning', text: '<strong>Moderate Performance.</strong> Overall accuracy at <strong>' + (avgAccuracy*100).toFixed(1) + '%</strong>. Some parameters need attention to meet the 95% target.' });
+  } else {
+    insights.push({ type: 'danger', text: '<strong>Needs Improvement.</strong> Overall accuracy at <strong>' + (avgAccuracy*100).toFixed(1) + '%</strong> is below acceptable thresholds. Immediate corrective action recommended.' });
+  }
+
+  // Failure insight
+  if (totalFail > 0) {
+    const failRate = ((totalFail / totalOpp) * 100).toFixed(1);
+    insights.push({ type: 'danger', text: '<strong>Failure Alert:</strong> ' + totalFail + ' opportunities failed out of ' + totalOpp + ' audited (' + failRate + '% failure rate). Investigate root causes in affected parameters.' });
+  } else {
+    insights.push({ type: 'success', text: '<strong>Zero Failures!</strong> All ' + totalOpp + ' audited opportunities passed. Outstanding compliance across all parameters.' });
+  }
+
+  // Stage analysis
+  const stageData = {};
+  filteredAudit.forEach(r => {
+    if (!stageData[r['Recruitment Stage']]) stageData[r['Recruitment Stage']] = { sum: 0, count: 0 };
+    stageData[r['Recruitment Stage']].sum += r['Accuracy Score'];
+    stageData[r['Recruitment Stage']].count++;
+  });
+  let weakestStage = null, weakestScore = 1;
+  Object.entries(stageData).forEach(([stage, d]) => {
+    const avg = d.sum / d.count;
+    if (avg < weakestScore) { weakestScore = avg; weakestStage = stage; }
+  });
+  if (weakestStage && weakestScore < 0.95) {
+    insights.push({ type: 'warning', text: '<strong>Focus Area:</strong> "' + weakestStage + '" stage has the lowest accuracy at <strong>' + (weakestScore*100).toFixed(1) + '%</strong>. Recommend targeted training and process review.' });
+  }
+
+  // Recruiter insight
+  if (view === 'recruiter' || view === 'overall') {
+    const recData = {};
+    filteredRecruiter.forEach(r => {
+      if (!recData[r['Recruiter Name']]) recData[r['Recruiter Name']] = { sum: 0, count: 0 };
+      recData[r['Recruiter Name']].sum += r['Audit Score'];
+      recData[r['Recruiter Name']].count++;
+    });
+    let topRec = null, topScore = 0, lowRec = null, lowScore = 1;
+    Object.entries(recData).forEach(([name, d]) => {
+      const avg = d.sum / d.count;
+      if (avg >= topScore) { topScore = avg; topRec = name; }
+      if (avg <= lowScore) { lowScore = avg; lowRec = name; }
+    });
+    if (topRec) insights.push({ type: 'success', text: '<strong>Top Performer:</strong> <strong>' + topRec + '</strong> leads with an average audit score of <strong>' + (topScore*100).toFixed(1) + '%</strong>. Recognize and share best practices.' });
+    if (lowRec && lowScore < 0.9 && lowRec !== topRec) insights.push({ type: 'warning', text: '<strong>Coaching Needed:</strong> <strong>' + lowRec + '</strong> has the lowest average score at <strong>' + (lowScore*100).toFixed(1) + '%</strong>. Consider a 1-on-1 improvement plan.' });
+  }
+
+  // Monthly trend insight
+  const monthData = {};
+  filteredAudit.forEach(r => {
+    const key = r['Month'];
+    if (!monthData[key]) monthData[key] = { sum: 0, count: 0 };
+    monthData[key].sum += r['Accuracy Score'];
+    monthData[key].count++;
+  });
+  const monthEntries = Object.entries(monthData).sort((a,b) => (MONTH_SORT[a[0]]||99) - (MONTH_SORT[b[0]]||99));
+  if (monthEntries.length >= 2) {
+    const last = monthEntries[monthEntries.length-1];
+    const prev = monthEntries[monthEntries.length-2];
+    const lastAvg = last[1].sum / last[1].count;
+    const prevAvg = prev[1].sum / prev[1].count;
+    const change = ((lastAvg - prevAvg)*100).toFixed(1);
+    if (parseFloat(change) > 0) {
+      insights.push({ type: 'success', text: '<strong>Positive Trend:</strong> Accuracy improved by <strong>+' + change + '%</strong> from ' + prev[0] + ' to ' + last[0] + '. The improvement initiatives are yielding results.' });
+    } else if (parseFloat(change) < 0) {
+      insights.push({ type: 'danger', text: '<strong>Declining Trend:</strong> Accuracy dropped by <strong>' + change + '%</strong> from ' + prev[0] + ' to ' + last[0] + '. Root cause analysis recommended.' });
+    }
+  }
+
+  container.innerHTML = insights.map(i => '<div class="ai-card ' + i.type + '">' + i.text + '</div>').join('');
+}
+
+// ============ CHART HELPERS ============
+function destroyChart(id) { if(charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+function pct(v) { return (v * 100).toFixed(1) + '%'; }
+
+const DATALABEL_DEFAULTS = {
+  display: true,
+  font: { weight: '700', size: 11 },
+  color: '#333',
+  anchor: 'end',
+  align: 'top',
+  formatter: (v) => typeof v === 'number' ? (v > 1 ? v : (v*100).toFixed(1)+'%') : v
+};
+
+const DATALABEL_INSIDE = {
+  ...DATALABEL_DEFAULTS,
+  anchor: 'center',
+  align: 'center',
+  color: '#fff',
+  font: { weight: '700', size: 10 }
+};
+
+function chartOptions(title, yPct, showLegend) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: showLegend !== false, position: 'top', labels: { font: { size: 11, weight: '500' }, padding: 12, usePointStyle: true } },
+      datalabels: DATALABEL_DEFAULTS,
+      tooltip: { backgroundColor: '#172B4D', titleFont: { size: 12, weight: '600' }, bodyFont: { size: 11 }, padding: 10, cornerRadius: 8 }
+    },
+    scales: {
+      y: { beginAtZero: true, max: yPct ? 1.05 : undefined, ticks: { callback: yPct ? (v) => (v*100)+'%' : undefined, font: { size: 11 } }, grid: { color: '#F0F0F0' } },
+      x: { ticks: { font: { size: 10 }, maxRotation: 45 }, grid: { display: false } }
+    }
+  };
+}
+
+function shortLabel(s, max) {
+  max = max || 25;
+  return s.length > max ? s.substring(0, max-2) + '..' : s;
+}
+
+function scoreBadge(v) {
+  const n = parseFloat(v);
+  if (isNaN(n) || v === '-' || v === '') return '<span class="score-badge score-mid">N/A</span>';
+  if (n >= 0.95) return '<span class="score-badge score-high">' + (n*100).toFixed(1) + '%</span>';
+  if (n >= 0.80) return '<span class="score-badge score-mid">' + (n*100).toFixed(1) + '%</span>';
+  return '<span class="score-badge score-low">' + (n*100).toFixed(1) + '%</span>';
+}
+
+// ============ RENDER: OVERALL ============
+function renderOverall() {
+  const d = filteredAudit;
+  if (!d.length) return;
+
+  const totalPop = d.reduce((s,r) => s + r['Total Population'], 0);
+  const totalOpp = d.reduce((s,r) => s + r['Opportunity Count'], 0);
+  const totalPass = d.reduce((s,r) => s + r['Opportunity Pass'], 0);
+  const totalFail = d.reduce((s,r) => s + r['Opportunity Fail'], 0);
+  const totalNA = d.reduce((s,r) => s + r['Opportunity NA'], 0);
+  const avgAcc = d.reduce((s,r) => s + r['Accuracy Score'], 0) / d.length;
+  const avgErr = d.reduce((s,r) => s + r['Error %'], 0) / d.length;
+
+  document.getElementById('overallKpis').innerHTML = [
+    kpiCard('Overall Accuracy', pct(avgAcc), 'Target: 95%', avgAcc >= 0.95 ? 'up' : avgAcc >= 0.8 ? 'neutral' : 'down', avgAcc >= 0.95 ? 'On Track' : 'Below Target'),
+    kpiCard('Total Population', totalPop, 'Across all stages', null, null),
+    kpiCard('Audited Opportunities', totalOpp, pct(totalOpp/totalPop) + ' sample rate', null, null),
+    kpiCard('Pass Rate', pct(totalPass/totalOpp), totalPass + ' of ' + totalOpp + ' passed', totalPass/totalOpp >= 0.95 ? 'up' : 'neutral', pct(totalPass/totalOpp)),
+    kpiCard('Failures', totalFail, totalFail === 0 ? 'Zero defects!' : 'Needs attention', totalFail === 0 ? 'up' : 'down', totalFail === 0 ? 'Clean' : totalFail + ' issues'),
+    kpiCard('Avg Error %', pct(avgErr), avgErr === 0 ? 'No errors detected' : 'Investigate causes', avgErr === 0 ? 'up' : 'down', avgErr === 0 ? 'Perfect' : 'Alert')
+  ].join('');
+
+  // Trend chart - accuracy over months
+  const monthGroups = {};
+  d.forEach(r => {
+    const key = r['Finanical Year'] + '-' + r['Month'];
+    if (!monthGroups[key]) monthGroups[key] = { sum: 0, count: 0, month: r['Month'], year: r['Finanical Year'], monthNum: r['MonthNumber'] };
+    monthGroups[key].sum += r['Accuracy Score'];
+    monthGroups[key].count++;
+  });
+  const trend = Object.values(monthGroups).sort((a,b) => a.year === b.year ? (MONTH_SORT[a.month]||99)-(MONTH_SORT[b.month]||99) : a.year-b.year);
+
+  destroyChart('trendChart');
+  charts.trendChart = new Chart(document.getElementById('trendChart'), {
+    type: 'line',
+    data: {
+      labels: trend.map(t => t.month + ' ' + t.year),
+      datasets: [{
+        label: 'Accuracy Score',
+        data: trend.map(t => t.sum/t.count),
+        borderColor: COLORS.blue,
+        backgroundColor: COLORS.blue + '20',
+        fill: true,
+        tension: 0.35,
+        pointRadius: 6,
+        pointBackgroundColor: COLORS.blue,
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+        borderWidth: 3
+      }]
+    },
+    options: chartOptions('', true, false),
+    plugins: [ChartDataLabels]
+  });
+
+  // Pass/Fail/NA donut
+  destroyChart('passFailChart');
+  charts.passFailChart = new Chart(document.getElementById('passFailChart'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Pass', 'Fail', 'NA'],
+      datasets: [{ data: [totalPass, totalFail, totalNA], backgroundColor: [COLORS.green, COLORS.red, COLORS.yellow], borderWidth: 2, borderColor: '#fff' }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 12, weight: '600' }, padding: 16, usePointStyle: true } },
+        datalabels: { color: '#fff', font: { weight: '700', size: 13 }, formatter: (v, ctx) => { const sum = ctx.dataset.data.reduce((a,b)=>a+b,0); return v > 0 ? v + ' (' + (v/sum*100).toFixed(1) + '%)' : ''; } }
+      }
+    },
+    plugins: [ChartDataLabels]
+  });
+
+  // Stage bar chart
+  const stageGroups = {};
+  d.forEach(r => {
+    if (!stageGroups[r['Recruitment Stage']]) stageGroups[r['Recruitment Stage']] = { sum: 0, count: 0 };
+    stageGroups[r['Recruitment Stage']].sum += r['Accuracy Score'];
+    stageGroups[r['Recruitment Stage']].count++;
+  });
+  const stages = Object.entries(stageGroups);
+
+  destroyChart('stageChart');
+  charts.stageChart = new Chart(document.getElementById('stageChart'), {
+    type: 'bar',
+    data: {
+      labels: stages.map(s => shortLabel(s[0], 20)),
+      datasets: [{ label: 'Avg Accuracy', data: stages.map(s => s[1].sum/s[1].count), backgroundColor: stages.map((s,i) => COLORS.palette[i % COLORS.palette.length]), borderRadius: 6, borderSkipped: false }]
+    },
+    options: chartOptions('', true, false),
+    plugins: [ChartDataLabels]
+  });
+
+  // Error trend
+  const errTrend = trend.map(t => {
+    const rows = d.filter(r => r['Finanical Year']===t.year && r['Month']===t.month);
+    return rows.reduce((s,r) => s + r['Error %'], 0) / rows.length;
+  });
+  destroyChart('errorTrendChart');
+  charts.errorTrendChart = new Chart(document.getElementById('errorTrendChart'), {
+    type: 'line',
+    data: {
+      labels: trend.map(t => t.month + ' ' + t.year),
+      datasets: [{
+        label: 'Error %',
+        data: errTrend,
+        borderColor: COLORS.red,
+        backgroundColor: COLORS.red + '15',
+        fill: true,
+        tension: 0.35,
+        pointRadius: 6,
+        pointBackgroundColor: COLORS.red,
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+        borderWidth: 3
+      }]
+    },
+    options: chartOptions('', true, false),
+    plugins: [ChartDataLabels]
+  });
+
+  // Table
+  renderTable('overallTable', ['Month','Year','Stage','Parameter','Population','Audited','Pass','Fail','NA','Accuracy','Error %'],
+    d.map(r => [r['Month'], r['Finanical Year'], r['Recruitment Stage'], shortLabel(r['Parameter'],35), r['Total Population'], r['Opportunity Count'], r['Opportunity Pass'], r['Opportunity Fail'], r['Opportunity NA'], scoreBadge(r['Accuracy Score']), scoreBadge(1-r['Error %'])]));
+}
+
+function kpiCard(label, value, sub, trendDir, trendText) {
+  let trendHtml = '';
+  if (trendDir) {
+    const icon = trendDir === 'up' ? 'fa-arrow-up' : trendDir === 'down' ? 'fa-arrow-down' : 'fa-minus';
+    trendHtml = '<div class="kpi-trend '+trendDir+'"><i class="fas '+icon+'"></i> '+trendText+'</div>';
+  }
+  return '<div class="kpi-card"><div class="kpi-label">'+label+'</div><div class="kpi-value">'+value+'</div><div class="kpi-sub">'+sub+'</div>'+trendHtml+'</div>';
+}
+
+// ============ RENDER: MONTHLY ============
+function renderMonthly() {
+  const d = filteredAudit;
+  if (!d.length) return;
+
+  const monthGroups = {};
+  d.forEach(r => {
+    const key = r['Month'];
+    if (!monthGroups[key]) monthGroups[key] = { sum: 0, count: 0, pop: 0, opp: 0, pass: 0, fail: 0, na: 0, err: 0 };
+    const g = monthGroups[key];
+    g.sum += r['Accuracy Score']; g.count++; g.pop += r['Total Population']; g.opp += r['Opportunity Count'];
+    g.pass += r['Opportunity Pass']; g.fail += r['Opportunity Fail']; g.na += r['Opportunity NA']; g.err += r['Error %'];
+  });
+  const months = Object.entries(monthGroups).sort((a,b) => (MONTH_SORT[a[0]]||99)-(MONTH_SORT[b[0]]||99));
+  
+  const bestMonth = months.reduce((best, m) => (m[1].sum/m[1].count > best[1].sum/best[1].count) ? m : best, months[0]);
+  const totalOpp = months.reduce((s,m) => s + m[1].opp, 0);
+  const overallAcc = months.reduce((s,m) => s + m[1].sum, 0) / months.reduce((s,m) => s + m[1].count, 0);
+
+  document.getElementById('monthlyKpis').innerHTML = [
+    kpiCard('Months Analyzed', months.length, 'Across selected filters', null, null),
+    kpiCard('Best Month', bestMonth[0], pct(bestMonth[1].sum/bestMonth[1].count) + ' accuracy', 'up', 'Top'),
+    kpiCard('Avg Monthly Accuracy', pct(overallAcc), 'Across all months', overallAcc >= 0.95 ? 'up' : 'neutral', overallAcc >= 0.95 ? 'On Target' : 'Below Target'),
+    kpiCard('Total Audited', totalOpp, 'Across all months', null, null)
+  ].join('');
+
+  // Monthly bar chart
+  destroyChart('monthlyBarChart');
+  charts.monthlyBarChart = new Chart(document.getElementById('monthlyBarChart'), {
+    type: 'bar',
+    data: {
+      labels: months.map(m => m[0]),
+      datasets: [
+        { label: 'Accuracy', data: months.map(m => m[1].sum/m[1].count), backgroundColor: COLORS.blue, borderRadius: 6, borderSkipped: false },
+        { label: 'Error %', data: months.map(m => m[1].err/m[1].count), backgroundColor: COLORS.red + '80', borderRadius: 6, borderSkipped: false }
+      ]
+    },
+    options: chartOptions('', true, true),
+    plugins: [ChartDataLabels]
+  });
+
+  // Sample count
+  destroyChart('monthlySampleChart');
+  charts.monthlySampleChart = new Chart(document.getElementById('monthlySampleChart'), {
+    type: 'bar',
+    data: {
+      labels: months.map(m => m[0]),
+      datasets: [
+        { label: 'Population', data: months.map(m => m[1].pop), backgroundColor: COLORS.teal + '60', borderRadius: 6 },
+        { label: 'Audited', data: months.map(m => m[1].opp), backgroundColor: COLORS.blue, borderRadius: 6 }
+      ]
+    },
+    options: { ...chartOptions('', false, true), plugins: { ...chartOptions('', false, true).plugins, datalabels: { ...DATALABEL_DEFAULTS, formatter: (v) => v } } },
+    plugins: [ChartDataLabels]
+  });
+
+  // Monthly error trend
+  destroyChart('monthlyErrorChart');
+  charts.monthlyErrorChart = new Chart(document.getElementById('monthlyErrorChart'), {
+    type: 'line',
+    data: {
+      labels: months.map(m => m[0]),
+      datasets: [{ label: 'Avg Error %', data: months.map(m => m[1].err/m[1].count), borderColor: COLORS.red, backgroundColor: COLORS.red+'15', fill: true, tension: 0.35, pointRadius: 6, pointBackgroundColor: COLORS.red, pointBorderColor: '#fff', pointBorderWidth: 2, borderWidth: 3 }]
+    },
+    options: chartOptions('', true, false),
+    plugins: [ChartDataLabels]
+  });
+
+  renderTable('monthlyTable', ['Month','Avg Accuracy','Avg Error %','Population','Audited','Pass','Fail','NA'],
+    months.map(m => [m[0], scoreBadge(m[1].sum/m[1].count), scoreBadge(1-m[1].err/m[1].count), m[1].pop, m[1].opp, m[1].pass, m[1].fail, m[1].na]));
+}
+
+// ============ RENDER: YEARLY ============
+function renderYearly() {
+  const d = filteredAudit;
+  if (!d.length) return;
+
+  const yearGroups = {};
+  d.forEach(r => {
+    const key = String(r['Finanical Year']);
+    if (!yearGroups[key]) yearGroups[key] = { sum: 0, count: 0, pop: 0, opp: 0, pass: 0, fail: 0, na: 0, err: 0 };
+    const g = yearGroups[key];
+    g.sum += r['Accuracy Score']; g.count++; g.pop += r['Total Population']; g.opp += r['Opportunity Count'];
+    g.pass += r['Opportunity Pass']; g.fail += r['Opportunity Fail']; g.na += r['Opportunity NA']; g.err += r['Error %'];
+  });
+  const years = Object.entries(yearGroups).sort((a,b) => a[0]-b[0]);
+
+  document.getElementById('yearlyKpis').innerHTML = [
+    kpiCard('Years Covered', years.length, years.map(y=>y[0]).join(', '), null, null),
+    ...years.map(y => kpiCard('FY ' + y[0] + ' Accuracy', pct(y[1].sum/y[1].count), y[1].opp + ' audited', y[1].sum/y[1].count >= 0.95 ? 'up' : 'neutral', pct(y[1].sum/y[1].count)))
+  ].join('');
+
+  // Yearly stage chart
+  const yearStage = {};
+  d.forEach(r => {
+    const key = r['Finanical Year'] + '||' + r['Recruitment Stage'];
+    if (!yearStage[key]) yearStage[key] = { sum: 0, count: 0, year: String(r['Finanical Year']), stage: r['Recruitment Stage'] };
+    yearStage[key].sum += r['Accuracy Score'];
+    yearStage[key].count++;
+  });
+  const uniqueStages = [...new Set(d.map(r => r['Recruitment Stage']))];
+  const yearLabels = years.map(y => y[0]);
+
+  destroyChart('yearlyStageChart');
+  charts.yearlyStageChart = new Chart(document.getElementById('yearlyStageChart'), {
+    type: 'bar',
+    data: {
+      labels: yearLabels,
+      datasets: uniqueStages.map((stage, i) => ({
+        label: shortLabel(stage, 22),
+        data: yearLabels.map(yr => { const k = yr+'||'+stage; return yearStage[k] ? yearStage[k].sum/yearStage[k].count : 0; }),
+        backgroundColor: COLORS.palette[i % COLORS.palette.length],
+        borderRadius: 4, borderSkipped: false
+      }))
+    },
+    options: chartOptions('', true, true),
+    plugins: [ChartDataLabels]
+  });
+
+  // Yearly pie
+  destroyChart('yearlyPieChart');
+  const totalPass = years.reduce((s,y)=>s+y[1].pass,0), totalFail = years.reduce((s,y)=>s+y[1].fail,0), totalNA = years.reduce((s,y)=>s+y[1].na,0);
+  charts.yearlyPieChart = new Chart(document.getElementById('yearlyPieChart'), {
+    type: 'pie',
+    data: { labels: ['Pass','Fail','NA'], datasets: [{ data: [totalPass,totalFail,totalNA], backgroundColor: [COLORS.green,COLORS.red,COLORS.yellow], borderWidth: 2, borderColor: '#fff' }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 12, weight: '600' }, padding: 16, usePointStyle: true } }, datalabels: { color: '#fff', font: { weight: '700', size: 13 }, formatter: (v, ctx) => { const sum = ctx.dataset.data.reduce((a,b)=>a+b,0); return v > 0 ? v + ' (' + (v/sum*100).toFixed(0) + '%)' : ''; } } } },
+    plugins: [ChartDataLabels]
+  });
+
+  // Population vs Sample
+  destroyChart('yearlyPopChart');
+  charts.yearlyPopChart = new Chart(document.getElementById('yearlyPopChart'), {
+    type: 'bar',
+    data: {
+      labels: yearLabels,
+      datasets: [
+        { label: 'Population', data: years.map(y=>y[1].pop), backgroundColor: COLORS.teal+'70', borderRadius: 6 },
+        { label: 'Audited', data: years.map(y=>y[1].opp), backgroundColor: COLORS.blue, borderRadius: 6 }
+      ]
+    },
+    options: { ...chartOptions('', false, true), plugins: { ...chartOptions('', false, true).plugins, datalabels: { ...DATALABEL_DEFAULTS, formatter: (v) => v } } },
+    plugins: [ChartDataLabels]
+  });
+
+  renderTable('yearlyTable', ['Year','Avg Accuracy','Avg Error %','Population','Audited','Pass','Fail','NA'],
+    years.map(y => [y[0], scoreBadge(y[1].sum/y[1].count), scoreBadge(1-y[1].err/y[1].count), y[1].pop, y[1].opp, y[1].pass, y[1].fail, y[1].na]));
+}
+
+// ============ RENDER: RECRUITER ============
+function renderRecruiter() {
+  const d = filteredRecruiter;
+  if (!d.length) return;
+
+  const recGroups = {};
+  d.forEach(r => {
+    if (!recGroups[r['Recruiter Name']]) recGroups[r['Recruiter Name']] = { sum: 0, count: 0 };
+    recGroups[r['Recruiter Name']].sum += r['Audit Score'];
+    recGroups[r['Recruiter Name']].count++;
+  });
+  const recs = Object.entries(recGroups).sort((a,b) => b[1].sum/b[1].count - a[1].sum/a[1].count);
+
+  const topRec = recs[0];
+  const avgScore = recs.reduce((s,r)=> s + r[1].sum/r[1].count, 0) / recs.length;
+
+  document.getElementById('recruiterKpis').innerHTML = [
+    kpiCard('Total Recruiters', recs.length, 'Under review', null, null),
+    kpiCard('Top Performer', topRec[0], pct(topRec[1].sum/topRec[1].count) + ' avg score', 'up', 'Best'),
+    kpiCard('Avg Score', pct(avgScore), 'Across all recruiters', avgScore >= 0.95 ? 'up' : 'neutral', pct(avgScore)),
+    kpiCard('Total Audits', d.length, 'Individual audit entries', null, null)
+  ].join('');
+
+  // Bar chart
+  destroyChart('recruiterBarChart');
+  charts.recruiterBarChart = new Chart(document.getElementById('recruiterBarChart'), {
+    type: 'bar',
+    data: {
+      labels: recs.map(r => r[0]),
+      datasets: [{ label: 'Avg Audit Score', data: recs.map(r => r[1].sum/r[1].count), backgroundColor: recs.map((r,i)=> COLORS.palette[i % COLORS.palette.length]), borderRadius: 8, borderSkipped: false }]
+    },
+    options: chartOptions('', true, false),
+    plugins: [ChartDataLabels]
+  });
+
+  // Radar chart - recruiter by parameter
+  const params = [...new Set(d.map(r => r['Parameter']))];
+  const topRecruiters = recs.slice(0, 6).map(r => r[0]);
+
+  destroyChart('recruiterRadarChart');
+  charts.recruiterRadarChart = new Chart(document.getElementById('recruiterRadarChart'), {
+    type: 'radar',
+    data: {
+      labels: params.map(p => shortLabel(p, 18)),
+      datasets: topRecruiters.map((rec, i) => {
+        const scores = params.map(p => {
+          const entries = d.filter(r => r['Recruiter Name'] === rec && r['Parameter'] === p);
+          return entries.length ? entries.reduce((s,r) => s + r['Audit Score'], 0)/entries.length : 0;
+        });
+        return { label: rec, data: scores, borderColor: COLORS.palette[i], backgroundColor: COLORS.palette[i]+'25', borderWidth: 2, pointRadius: 4, pointBackgroundColor: COLORS.palette[i] };
+      })
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', labels: { font: { size: 11, weight: '500' }, usePointStyle: true } }, datalabels: { display: false } },
+      scales: { r: { min: 0, max: 1, ticks: { stepSize: 0.2, callback: (v) => (v*100)+'%', font: { size: 9 } }, pointLabels: { font: { size: 9 } } } }
+    },
+    plugins: [ChartDataLabels]
+  });
+
+  // Recruiter monthly trend
+  const recMonthly = {};
+  d.forEach(r => {
+    const key = r['Recruiter Name'] + '||' + r['Month'];
+    if (!recMonthly[key]) recMonthly[key] = { sum: 0, count: 0, rec: r['Recruiter Name'], month: r['Month'] };
+    recMonthly[key].sum += r['Audit Score'];
+    recMonthly[key].count++;
+  });
+  const allMonths = [...new Set(d.map(r => r['Month']))].sort((a,b) => (MONTH_SORT[a]||99)-(MONTH_SORT[b]||99));
+
+  destroyChart('recruiterTrendChart');
+  charts.recruiterTrendChart = new Chart(document.getElementById('recruiterTrendChart'), {
+    type: 'line',
+    data: {
+      labels: allMonths,
+      datasets: topRecruiters.map((rec, i) => ({
+        label: rec,
+        data: allMonths.map(m => { const k = rec+'||'+m; return recMonthly[k] ? recMonthly[k].sum/recMonthly[k].count : null; }),
+        borderColor: COLORS.palette[i],
+        backgroundColor: COLORS.palette[i]+'15',
+        tension: 0.35,
+        pointRadius: 5,
+        pointBackgroundColor: COLORS.palette[i],
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+        borderWidth: 2.5,
+        spanGaps: true
+      }))
+    },
+    options: { ...chartOptions('', true, true), plugins: { ...chartOptions('', true, true).plugins, datalabels: { display: false } } },
+    plugins: [ChartDataLabels]
+  });
+
+  // Table
+  const tableData = [];
+  recs.forEach(([name, data]) => {
+    const paramScores = {};
+    d.filter(r => r['Recruiter Name'] === name).forEach(r => {
+      if (!paramScores[r['Parameter']]) paramScores[r['Parameter']] = { sum: 0, count: 0 };
+      paramScores[r['Parameter']].sum += r['Audit Score'];
+      paramScores[r['Parameter']].count++;
+    });
+    Object.entries(paramScores).forEach(([param, ps]) => {
+      tableData.push([name, shortLabel(param, 35), ps.count, scoreBadge(ps.sum/ps.count)]);
+    });
+  });
+  renderTable('recruiterTable', ['Recruiter','Parameter','Audits','Avg Score'], tableData);
+}
+
+// ============ RENDER: PARAMETER ============
+function renderParameter() {
+  const d = filteredAudit;
+  if (!d.length) return;
+
+  const paramGroups = {};
+  d.forEach(r => {
+    if (!paramGroups[r['Parameter']]) paramGroups[r['Parameter']] = { sum: 0, count: 0, pop: 0, opp: 0, pass: 0, fail: 0, na: 0, err: 0 };
+    const g = paramGroups[r['Parameter']];
+    g.sum += r['Accuracy Score']; g.count++; g.pop += r['Total Population']; g.opp += r['Opportunity Count'];
+    g.pass += r['Opportunity Pass']; g.fail += r['Opportunity Fail']; g.na += r['Opportunity NA']; g.err += r['Error %'];
+  });
+  const params = Object.entries(paramGroups);
+  const best = params.reduce((best, p) => (p[1].sum/p[1].count > best[1].sum/best[1].count) ? p : best, params[0]);
+  const avgAcc = params.reduce((s,p) => s + p[1].sum/p[1].count, 0) / params.length;
+
+  document.getElementById('parameterKpis').innerHTML = [
+    kpiCard('Parameters Tracked', params.length, 'Across all stages', null, null),
+    kpiCard('Best Parameter', shortLabel(best[0],20), pct(best[1].sum/best[1].count) + ' accuracy', 'up', 'Top'),
+    kpiCard('Avg Parameter Accuracy', pct(avgAcc), 'Across all parameters', avgAcc >= 0.95 ? 'up' : 'neutral', pct(avgAcc)),
+    kpiCard('Total Opportunities', params.reduce((s,p)=>s+p[1].opp,0), 'Audited across parameters', null, null)
+  ].join('');
+
+  // Horizontal bar
+  destroyChart('paramBarChart');
+  const sortedParams = [...params].sort((a,b) => a[1].sum/a[1].count - b[1].sum/b[1].count);
+  charts.paramBarChart = new Chart(document.getElementById('paramBarChart'), {
+    type: 'bar',
+    data: {
+      labels: sortedParams.map(p => shortLabel(p[0], 35)),
+      datasets: [{ label: 'Accuracy', data: sortedParams.map(p => p[1].sum/p[1].count), backgroundColor: sortedParams.map(p => { const v = p[1].sum/p[1].count; return v >= 0.95 ? COLORS.green : v >= 0.8 ? COLORS.yellow : COLORS.red; }), borderRadius: 6, borderSkipped: false }]
+    },
+    options: { ...chartOptions('', true, false), indexAxis: 'y', scales: { x: { beginAtZero: true, max: 1.05, ticks: { callback: (v) => (v*100)+'%' }, grid: { color: '#F0F0F0' } }, y: { ticks: { font: { size: 10 } }, grid: { display: false } } } },
+    plugins: [ChartDataLabels]
+  });
+
+  // Error comparison
+  destroyChart('paramErrorChart');
+  charts.paramErrorChart = new Chart(document.getElementById('paramErrorChart'), {
+    type: 'bar',
+    data: {
+      labels: params.map(p => shortLabel(p[0], 15)),
+      datasets: [{ label: 'Avg Error %', data: params.map(p => p[1].err/p[1].count), backgroundColor: params.map(p => { const v = p[1].err/p[1].count; return v === 0 ? COLORS.green : v < 0.1 ? COLORS.yellow : COLORS.red; }), borderRadius: 6 }]
+    },
+    options: chartOptions('', true, false),
+    plugins: [ChartDataLabels]
+  });
+
+  // Pass rate pie
+  destroyChart('paramPieChart');
+  const totalPass = params.reduce((s,p)=>s+p[1].pass,0);
+  const totalFail = params.reduce((s,p)=>s+p[1].fail,0);
+  const totalNA = params.reduce((s,p)=>s+p[1].na,0);
+  charts.paramPieChart = new Chart(document.getElementById('paramPieChart'), {
+    type: 'doughnut',
+    data: { labels: ['Pass','Fail','NA'], datasets: [{ data: [totalPass,totalFail,totalNA], backgroundColor: [COLORS.green,COLORS.red,COLORS.yellow], borderWidth: 2, borderColor: '#fff' }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 12, weight: '600' }, padding: 16, usePointStyle: true } }, datalabels: { color: '#fff', font: { weight: '700', size: 13 }, formatter: (v, ctx) => { const sum = ctx.dataset.data.reduce((a,b)=>a+b,0); return v > 0 ? v + ' (' + (v/sum*100).toFixed(0) + '%)' : ''; } } } },
+    plugins: [ChartDataLabels]
+  });
+
+  renderTable('parameterTable', ['Parameter','Accuracy','Error %','Population','Audited','Pass','Fail','NA'],
+    params.map(p => [p[0], scoreBadge(p[1].sum/p[1].count), scoreBadge(1-p[1].err/p[1].count), p[1].pop, p[1].opp, p[1].pass, p[1].fail, p[1].na]));
+}
+
+// ============ TABLE RENDER ============
+function renderTable(tableId, headers, rows) {
+  const table = document.getElementById(tableId);
+  let html = '<thead><tr>' + headers.map(h => '<th>'+h+'</th>').join('') + '</tr></thead><tbody>';
+  rows.forEach(row => {
+    html += '<tr>' + row.map(cell => '<td>'+cell+'</td>').join('') + '</tr>';
+  });
+  html += '</tbody>';
+  table.innerHTML = html;
+}
+
+// ============ INIT ============
+document.addEventListener('DOMContentLoaded', () => {
+  Chart.register(ChartDataLabels);
+  Chart.defaults.plugins.datalabels = { display: false }; // Off by default, enable per chart
+});
+</script>
+</body>
+</html>`;
 
 export default app
