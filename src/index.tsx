@@ -57,6 +57,7 @@ const dashboardHTML = `<!DOCTYPE html>
 <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 :root {
@@ -216,6 +217,49 @@ body { font-family: 'Inter', sans-serif; background: #F7F8FC; color: #172B4D; }
 ::-webkit-scrollbar-thumb { background: #C1C7D0; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #A5ADBA; }
 
+/* UPLOAD MODAL */
+.upload-overlay { position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.5); display:none; align-items:center; justify-content:center; }
+.upload-overlay.show { display:flex; }
+.upload-modal { background:#fff; border-radius:16px; padding:36px 32px; width:520px; max-width:95vw; box-shadow:0 20px 60px rgba(0,0,0,0.25); }
+.upload-modal h2 { font-size:1.2rem; font-weight:700; color:var(--skf-blue); margin-bottom:6px; display:flex; align-items:center; gap:8px; }
+.upload-modal p { font-size:0.82rem; color:var(--skf-gray); margin-bottom:18px; }
+.upload-drop-zone {
+  border:2.5px dashed var(--skf-border); border-radius:12px; padding:36px 20px; text-align:center;
+  cursor:pointer; transition:all 0.25s; background:#FAFBFC; margin-bottom:16px;
+}
+.upload-drop-zone:hover, .upload-drop-zone.dragover { border-color:var(--skf-blue); background:var(--skf-blue-light); }
+.upload-drop-zone i { font-size:2.2rem; color:var(--skf-blue); margin-bottom:10px; }
+.upload-drop-zone .drop-label { font-size:0.9rem; font-weight:600; color:#333; }
+.upload-drop-zone .drop-sub { font-size:0.75rem; color:var(--skf-gray); margin-top:4px; }
+.upload-file-info {
+  display:none; padding:12px 16px; background:#F0F7FF; border-radius:10px; border:1px solid #B3D4FC;
+  margin-bottom:16px; font-size:0.82rem; color:#333; align-items:center; gap:10px;
+}
+.upload-file-info.show { display:flex; }
+.upload-file-info i { color:var(--skf-green); font-size:1.1rem; }
+.upload-file-info .file-name { font-weight:600; flex:1; }
+.upload-file-info .file-remove { cursor:pointer; color:var(--skf-red); font-size:0.9rem; }
+.upload-sheet-select { margin-bottom:16px; display:none; }
+.upload-sheet-select.show { display:block; }
+.upload-sheet-select label { font-size:0.75rem; font-weight:600; color:var(--skf-gray); text-transform:uppercase; display:block; margin-bottom:4px; }
+.upload-sheet-select select { width:100%; padding:8px 12px; border:1.5px solid var(--skf-border); border-radius:8px; font-size:0.85rem; outline:none; }
+.upload-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:8px; }
+.upload-actions button { padding:10px 22px; border-radius:10px; font-size:0.9rem; font-weight:600; cursor:pointer; transition:all 0.2s; }
+.btn-cancel { background:#F4F5F7; border:1px solid var(--skf-border); color:var(--skf-gray); }
+.btn-cancel:hover { background:#E0E0E0; }
+.btn-upload { background:var(--skf-blue); border:none; color:#fff; }
+.btn-upload:hover { background:var(--skf-blue-dark); }
+.btn-upload:disabled { opacity:0.5; cursor:not-allowed; }
+.upload-status { font-size:0.78rem; margin-top:10px; padding:8px 12px; border-radius:8px; display:none; }
+.upload-status.show { display:block; }
+.upload-status.success { background:#E8F5E9; color:#2E7D32; }
+.upload-status.error { background:#FBE9E7; color:#C62828; }
+.upload-type-tabs { display:flex; gap:8px; margin-bottom:16px; }
+.upload-type-tab { flex:1; padding:10px; border:2px solid var(--skf-border); border-radius:10px; text-align:center; cursor:pointer; font-size:0.82rem; font-weight:600; color:var(--skf-gray); transition:all 0.2s; }
+.upload-type-tab:hover { border-color:var(--skf-blue); color:var(--skf-blue); }
+.upload-type-tab.active { border-color:var(--skf-blue); background:var(--skf-blue-light); color:var(--skf-blue); }
+.upload-type-tab i { display:block; font-size:1.2rem; margin-bottom:4px; }
+
 /* Responsive */
 @media (max-width: 1024px) {
   .charts-grid { grid-template-columns: 1fr; }
@@ -272,9 +316,58 @@ body { font-family: 'Inter', sans-serif; background: #F7F8FC; color: #172B4D; }
     </div>
   </div>
   <div class="sidebar-footer">
+    <button onclick="openUploadModal()" style="margin-bottom:8px;background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.3);"><i class="fas fa-file-upload"></i>&nbsp; Upload Excel</button>
     <button onclick="doLogout()"><i class="fas fa-sign-out-alt"></i>&nbsp; Logout</button>
   </div>
 </nav>
+
+<!-- UPLOAD MODAL -->
+<div class="upload-overlay" id="uploadOverlay">
+  <div class="upload-modal">
+    <h2><i class="fas fa-file-upload"></i> Upload Excel Data</h2>
+    <p>Upload a new Excel file to override the current dashboard data. The file should match the standard format with "Audit Count" and "Recruiter" sheets.</p>
+    
+    <div class="upload-type-tabs">
+      <div class="upload-type-tab active" id="tabAudit" onclick="setUploadType('audit')">
+        <i class="fas fa-chart-bar"></i> Audit Data
+      </div>
+      <div class="upload-type-tab" id="tabRecruiter" onclick="setUploadType('recruiter')">
+        <i class="fas fa-users"></i> Recruiter Data
+      </div>
+      <div class="upload-type-tab" id="tabBoth" onclick="setUploadType('both')">
+        <i class="fas fa-layer-group"></i> Both Sheets
+      </div>
+    </div>
+    
+    <div class="upload-drop-zone" id="uploadDropZone">
+      <i class="fas fa-cloud-upload-alt"></i>
+      <div class="drop-label">Drag & drop your Excel file here</div>
+      <div class="drop-sub">or click to browse (.xlsx, .xls)</div>
+      <input type="file" id="uploadFileInput" accept=".xlsx,.xls" style="display:none;">
+    </div>
+    
+    <div class="upload-file-info" id="uploadFileInfo">
+      <i class="fas fa-check-circle"></i>
+      <span class="file-name" id="uploadFileName"></span>
+      <span class="file-remove" onclick="clearUploadFile()"><i class="fas fa-times-circle"></i></span>
+    </div>
+    
+    <div class="upload-sheet-select" id="uploadSheetSelect">
+      <label>Select Audit Sheet</label>
+      <select id="auditSheetDropdown"></select>
+      <div style="height:8px;"></div>
+      <label>Select Recruiter Sheet</label>
+      <select id="recruiterSheetDropdown"></select>
+    </div>
+    
+    <div id="uploadStatus" class="upload-status"></div>
+    
+    <div class="upload-actions">
+      <button class="btn-cancel" onclick="closeUploadModal()">Cancel</button>
+      <button class="btn-upload" id="btnApplyUpload" onclick="applyUpload()" disabled>Apply Data</button>
+    </div>
+  </div>
+</div>
 
 <!-- MAIN -->
 <div class="main" id="mainContent" style="display:none;">
@@ -286,6 +379,7 @@ body { font-family: 'Inter', sans-serif; background: #F7F8FC; color: #172B4D; }
     </div>
     <div class="topbar-right">
       <span id="accountBadge" class="account-badge"></span>
+      <button onclick="openUploadModal()" style="padding:6px 14px;background:var(--skf-blue-light);border:1.5px solid #B3D4FC;border-radius:8px;cursor:pointer;font-size:0.78rem;font-weight:600;color:var(--skf-blue);transition:all 0.2s;" onmouseover="this.style.background='#D0E4FF'" onmouseout="this.style.background='var(--skf-blue-light)'"><i class="fas fa-file-upload"></i>&nbsp; Upload Data</button>
       <span style="font-size:0.8rem;color:var(--skf-gray);"><i class="fas fa-clock"></i> <span id="lastUpdated"></span></span>
     </div>
   </div>
@@ -1281,6 +1375,203 @@ function renderTable(tableId, headers, rows) {
   html += '</tbody>';
   table.innerHTML = html;
 }
+
+// ============ EXCEL UPLOAD ============
+let uploadType = 'both';
+let uploadedWorkbook = null;
+let uploadedFile = null;
+
+function openUploadModal() {
+  document.getElementById('uploadOverlay').classList.add('show');
+  clearUploadFile();
+  setUploadType('both');
+  document.getElementById('uploadStatus').classList.remove('show');
+}
+
+function closeUploadModal() {
+  document.getElementById('uploadOverlay').classList.remove('show');
+  clearUploadFile();
+}
+
+function setUploadType(type) {
+  uploadType = type;
+  document.querySelectorAll('.upload-type-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1)).classList.add('active');
+  updateSheetDropdowns();
+}
+
+function clearUploadFile() {
+  uploadedWorkbook = null;
+  uploadedFile = null;
+  document.getElementById('uploadFileInput').value = '';
+  document.getElementById('uploadFileInfo').classList.remove('show');
+  document.getElementById('uploadSheetSelect').classList.remove('show');
+  document.getElementById('btnApplyUpload').disabled = true;
+  document.getElementById('uploadDropZone').style.display = 'block';
+  document.getElementById('uploadStatus').classList.remove('show');
+}
+
+// Drag & Drop + Click
+(function() {
+  const dropZone = document.getElementById('uploadDropZone');
+  const fileInput = document.getElementById('uploadFileInput');
+  
+  if (!dropZone || !fileInput) return;
+  
+  dropZone.addEventListener('click', () => fileInput.click());
+  
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) handleFileSelect(files[0]);
+  });
+  
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) handleFileSelect(e.target.files[0]);
+  });
+})();
+
+function handleFileSelect(file) {
+  if (!file.name.match(/\\.xlsx?$/i)) {
+    showUploadStatus('error', 'Please select a valid Excel file (.xlsx or .xls)');
+    return;
+  }
+  
+  uploadedFile = file;
+  document.getElementById('uploadFileName').textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+  document.getElementById('uploadFileInfo').classList.add('show');
+  document.getElementById('uploadDropZone').style.display = 'none';
+  
+  // Parse with SheetJS
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      uploadedWorkbook = XLSX.read(e.target.result, { type: 'array' });
+      updateSheetDropdowns();
+      document.getElementById('btnApplyUpload').disabled = false;
+      showUploadStatus('success', 'File parsed successfully! ' + uploadedWorkbook.SheetNames.length + ' sheet(s) found: ' + uploadedWorkbook.SheetNames.join(', '));
+    } catch(err) {
+      showUploadStatus('error', 'Failed to parse Excel file: ' + err.message);
+      document.getElementById('btnApplyUpload').disabled = true;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function updateSheetDropdowns() {
+  const sheetSelect = document.getElementById('uploadSheetSelect');
+  const auditDD = document.getElementById('auditSheetDropdown');
+  const recDD = document.getElementById('recruiterSheetDropdown');
+  
+  if (!uploadedWorkbook) { sheetSelect.classList.remove('show'); return; }
+  
+  const names = uploadedWorkbook.SheetNames;
+  
+  // Auto-detect sheets
+  let auditIdx = names.findIndex(n => /audit/i.test(n));
+  let recIdx = names.findIndex(n => /recruiter|performance/i.test(n));
+  if (auditIdx < 0) auditIdx = 0;
+  if (recIdx < 0) recIdx = names.length > 1 ? 1 : 0;
+  
+  auditDD.innerHTML = names.map((n,i) => '<option value="'+i+'" '+(i===auditIdx?'selected':'')+'>'+n+'</option>').join('');
+  recDD.innerHTML = names.map((n,i) => '<option value="'+i+'" '+(i===recIdx?'selected':'')+'>'+n+'</option>').join('');
+  
+  if (uploadType === 'both' || names.length > 1) {
+    sheetSelect.classList.add('show');
+  } else {
+    sheetSelect.classList.remove('show');
+  }
+}
+
+function showUploadStatus(type, msg) {
+  const el = document.getElementById('uploadStatus');
+  el.className = 'upload-status show ' + type;
+  el.innerHTML = '<i class="fas ' + (type === 'success' ? 'fa-check-circle' : 'fa-exclamation-triangle') + '"></i> ' + msg;
+}
+
+function applyUpload() {
+  if (!uploadedWorkbook) return;
+  
+  try {
+    const names = uploadedWorkbook.SheetNames;
+    const auditSheetIdx = parseInt(document.getElementById('auditSheetDropdown').value);
+    const recSheetIdx = parseInt(document.getElementById('recruiterSheetDropdown').value);
+    
+    if (uploadType === 'audit' || uploadType === 'both') {
+      const ws = uploadedWorkbook.Sheets[names[auditSheetIdx]];
+      const raw = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      
+      // Clean audit data
+      const cleaned = raw.map(r => {
+        const row = {};
+        Object.keys(r).forEach(k => { row[k.trim()] = r[k]; });
+        return row;
+      });
+      
+      cleaned.forEach(r => {
+        r['Month'] = (r['Month']||'').toString().trim();
+        r['Recruitment Stage'] = (r['Recruitment Stage']||'').toString().trim();
+        r['Parameter'] = (r['Parameter']||'').toString().trim();
+        r['Week'] = (r['Week']||'').toString().trim();
+        r['Finanical Year'] = r['Finanical Year'] || r['Financial Year'] || r['Year'] || '';
+        r['MonthNumber'] = parseInt(r['MonthNumber'] || r['Month Number']) || 0;
+        r['Accuracy Score'] = parseFloat(r['Accuracy Score']) || 0;
+        r['Error %'] = parseFloat(r['Error %'] || r['Error']) || 0;
+        r['Total Population'] = parseInt(r['Total Population']) || 0;
+        r['Opportunity Count'] = parseInt(r['Opportunity Count']) || 0;
+        r['Opportunity Pass'] = parseInt(r['Opportunity Pass']) || 0;
+        r['Opportunity Fail'] = parseInt(r['Opportunity Fail']) || 0;
+        r['Opportunity NA'] = parseInt(r['Opportunity NA']) || 0;
+        r['Sample Count'] = parseFloat(r['Sample Count']) || 0;
+      });
+      
+      auditData = cleaned;
+    }
+    
+    if (uploadType === 'recruiter' || uploadType === 'both') {
+      const ws = uploadedWorkbook.Sheets[names[recSheetIdx]];
+      const raw = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      
+      const cleaned = raw.map(r => {
+        const row = {};
+        Object.keys(r).forEach(k => { row[k.trim()] = r[k]; });
+        return row;
+      });
+      
+      cleaned.forEach(r => {
+        r['Month'] = (r['Month '] || r['Month'] || '').toString().trim();
+        r['Recruiter Name'] = (r['Recruiter Name']||'').toString().trim();
+        r['Parameter'] = (r['Parameter '] || r['Parameter'] || '').toString().trim();
+        r['Week'] = (r['Week']||'').toString().trim();
+        r['Financial Year'] = r['Financial Year'] || r['Finanical Year'] || r['Year'] || '';
+        r['Audit Score'] = parseFloat(r['Audit Score']) || 0;
+      });
+      
+      recruiterData = cleaned;
+    }
+    
+    // Refresh dashboard
+    initFilters();
+    applyFilters();
+    
+    document.getElementById('lastUpdated').textContent = 'Uploaded ' + new Date().toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) + ' ' + new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
+    
+    showUploadStatus('success', 'Data applied successfully! Dashboard updated with ' + (uploadType === 'both' ? 'audit (' + auditData.length + ' rows) and recruiter (' + recruiterData.length + ' rows)' : uploadType === 'audit' ? auditData.length + ' audit rows' : recruiterData.length + ' recruiter rows') + '.');
+    
+    setTimeout(() => closeUploadModal(), 1500);
+    
+  } catch(err) {
+    showUploadStatus('error', 'Error processing data: ' + err.message);
+  }
+}
+
+// Close upload modal on overlay click
+document.getElementById('uploadOverlay')?.addEventListener('click', function(e) {
+  if (e.target === this) closeUploadModal();
+});
 
 // ============ INIT ============
 document.addEventListener('DOMContentLoaded', () => {
