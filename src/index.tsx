@@ -524,9 +524,23 @@ let filteredRecruiter = [];
 let charts = {};
 let activeFilters = { year: [], month: [], week: [], stage: [], parameter: [], recruiter: [] };
 
+// Calendar month index for chronological sorting (Jan=1 ... Dec=12)
+const MONTH_NUM = { Jan:1, Feb:2, Mar:3, Apr:4, May:5, Jun:6, Jul:7, Aug:8, Sep:9, Oct:10, Nov:11, Dec:12 };
+
+// Fiscal year display order (Oct start) — used only for display when no year context
 const MONTH_ORDER = ['Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep'];
 const MONTH_SORT = {};
 MONTH_ORDER.forEach((m,i) => MONTH_SORT[m.trim()] = i);
+
+// Chronological sort key: year*100 + calendarMonth  (e.g., Oct 2025 → 202510, Jan 2026 → 202601)
+function chronoKey(year, month) {
+  return (parseInt(year) || 0) * 100 + (MONTH_NUM[month] || 0);
+}
+
+// Short label: "Oct 25", "Jan 26"
+function monthYearLabel(month, year) {
+  return month + ' ' + String(year).slice(-2);
+}
 
 const COLORS = {
   blue: '#0054A6', teal: '#007C92', green: '#00875A', red: '#DE350B',
@@ -847,25 +861,27 @@ function generateAIInsights(view) {
     if (lowRec && lowScore < 85 && lowRec !== topRec) insights.push({ type: 'danger', text: '<strong>Coaching Needed:</strong> <strong>' + lowRec + '</strong> has the lowest accuracy at <strong>' + Math.round(lowScore) + '%</strong> (Needs Attention). Consider a 1-on-1 improvement plan.' });
   }
 
-  // Monthly trend insight using correct formula
-  const monthData = {};
+  // Monthly trend insight — chronological Year+Month comparison
+  const monthTrendData = {};
   filteredAudit.forEach(r => {
-    const key = r['Month'];
-    if (!monthData[key]) monthData[key] = { pass: 0, fail: 0 };
-    monthData[key].pass += r['Opportunity Pass'];
-    monthData[key].fail += r['Opportunity Fail'];
+    const key = r['Finanical Year'] + '-' + r['Month'];
+    if (!monthTrendData[key]) monthTrendData[key] = { pass: 0, fail: 0, month: r['Month'], year: r['Finanical Year'] };
+    monthTrendData[key].pass += r['Opportunity Pass'];
+    monthTrendData[key].fail += r['Opportunity Fail'];
   });
-  const monthEntries = Object.entries(monthData).sort((a,b) => (MONTH_SORT[a[0]]||99) - (MONTH_SORT[b[0]]||99));
-  if (monthEntries.length >= 2) {
-    const last = monthEntries[monthEntries.length-1];
-    const prev = monthEntries[monthEntries.length-2];
-    const lastAcc = calcAccuracy(last[1].pass, last[1].fail) * 100;
-    const prevAcc = calcAccuracy(prev[1].pass, prev[1].fail) * 100;
+  const monthTrendEntries = Object.values(monthTrendData).sort((a,b) => chronoKey(a.year,a.month) - chronoKey(b.year,b.month));
+  if (monthTrendEntries.length >= 2) {
+    const last = monthTrendEntries[monthTrendEntries.length-1];
+    const prev = monthTrendEntries[monthTrendEntries.length-2];
+    const lastAcc = calcAccuracy(last.pass, last.fail) * 100;
+    const prevAcc = calcAccuracy(prev.pass, prev.fail) * 100;
     const change = Math.round(lastAcc - prevAcc);
+    const lastLabel = monthYearLabel(last.month, last.year);
+    const prevLabel = monthYearLabel(prev.month, prev.year);
     if (change > 0) {
-      insights.push({ type: 'success', text: '<strong>Positive Trend:</strong> Accuracy improved by <strong>+' + change + '%</strong> from ' + prev[0] + ' (' + Math.round(prevAcc) + '%) to ' + last[0] + ' (' + Math.round(lastAcc) + '%).' });
+      insights.push({ type: 'success', text: '<strong>Positive Trend:</strong> Accuracy improved by <strong>+' + change + '%</strong> from ' + prevLabel + ' (' + Math.round(prevAcc) + '%) to ' + lastLabel + ' (' + Math.round(lastAcc) + '%).' });
     } else if (change < 0) {
-      insights.push({ type: 'danger', text: '<strong>Declining Trend:</strong> Accuracy dropped by <strong>' + change + '%</strong> from ' + prev[0] + ' (' + Math.round(prevAcc) + '%) to ' + last[0] + ' (' + Math.round(lastAcc) + '%). Root cause analysis recommended.' });
+      insights.push({ type: 'danger', text: '<strong>Declining Trend:</strong> Accuracy dropped by <strong>' + change + '%</strong> from ' + prevLabel + ' (' + Math.round(prevAcc) + '%) to ' + lastLabel + ' (' + Math.round(lastAcc) + '%). Root cause analysis recommended.' });
     }
   }
 
@@ -991,24 +1007,24 @@ function renderOverall() {
     kpiCard('Error Rate', errPct.toFixed(0) + '%', errPct === 0 ? 'No errors detected' : 'Investigate causes', errPct === 0 ? 'up' : 'down', errPct === 0 ? 'Perfect' : 'Alert')
   ].join('');
 
-  // Trend chart - accuracy over months using correct formula
+  // Trend chart - accuracy over months (chronological order)
   const monthGroups = {};
   d.forEach(r => {
     const key = r['Finanical Year'] + '-' + r['Month'];
-    if (!monthGroups[key]) monthGroups[key] = { pass: 0, fail: 0, na: 0, pop: 0, opp: 0, month: r['Month'], year: r['Finanical Year'], monthNum: r['MonthNumber'] };
+    if (!monthGroups[key]) monthGroups[key] = { pass: 0, fail: 0, na: 0, pop: 0, opp: 0, month: r['Month'], year: r['Finanical Year'] };
     monthGroups[key].pass += r['Opportunity Pass'];
     monthGroups[key].fail += r['Opportunity Fail'];
     monthGroups[key].na += r['Opportunity NA'];
     monthGroups[key].pop += r['Total Population'];
     monthGroups[key].opp += r['Opportunity Count'];
   });
-  const trend = Object.values(monthGroups).sort((a,b) => a.year === b.year ? (MONTH_SORT[a.month]||99)-(MONTH_SORT[b.month]||99) : a.year-b.year);
+  const trend = Object.values(monthGroups).sort((a,b) => chronoKey(a.year,a.month) - chronoKey(b.year,b.month));
 
   destroyChart('trendChart');
   charts.trendChart = new Chart(document.getElementById('trendChart'), {
     type: 'line',
     data: {
-      labels: trend.map(t => t.month + ' ' + t.year),
+      labels: trend.map(t => monthYearLabel(t.month, t.year)),
       datasets: [{
         label: 'Accuracy %',
         data: trend.map(t => calcAccuracy(t.pass, t.fail) * 100),
@@ -1071,7 +1087,7 @@ function renderOverall() {
   charts.errorTrendChart = new Chart(document.getElementById('errorTrendChart'), {
     type: 'line',
     data: {
-      labels: trend.map(t => t.month + ' ' + t.year),
+      labels: trend.map(t => monthYearLabel(t.month, t.year)),
       datasets: [{
         label: 'Error %',
         data: errTrend,
@@ -1114,15 +1130,16 @@ function renderMonthly() {
   const d = filteredAudit;
   if (!d.length) return;
 
+  // Group by Year+Month for correct chronological display
   const monthGroups = {};
   d.forEach(r => {
-    const key = r['Month'];
-    if (!monthGroups[key]) monthGroups[key] = { pop: 0, opp: 0, pass: 0, fail: 0, na: 0 };
+    const key = r['Finanical Year'] + '-' + r['Month'];
+    if (!monthGroups[key]) monthGroups[key] = { pop: 0, opp: 0, pass: 0, fail: 0, na: 0, month: r['Month'], year: r['Finanical Year'] };
     const g = monthGroups[key];
     g.pop += r['Total Population']; g.opp += r['Opportunity Count'];
     g.pass += r['Opportunity Pass']; g.fail += r['Opportunity Fail']; g.na += r['Opportunity NA'];
   });
-  const months = Object.entries(monthGroups).sort((a,b) => (MONTH_SORT[a[0]]||99)-(MONTH_SORT[b[0]]||99));
+  const months = Object.entries(monthGroups).sort((a,b) => chronoKey(a[1].year,a[1].month) - chronoKey(b[1].year,b[1].month));
   
   const bestMonth = months.reduce((best, m) => (calcAccuracy(m[1].pass,m[1].fail) > calcAccuracy(best[1].pass,best[1].fail)) ? m : best, months[0]);
   const totalOpp = months.reduce((s,m) => s + m[1].opp, 0);
@@ -1132,7 +1149,7 @@ function renderMonthly() {
 
   document.getElementById('monthlyKpis').innerHTML = [
     kpiCard('Months Analyzed', months.length, 'Across selected filters', null, null),
-    kpiCard('Best Month', bestMonth[0], Math.round(calcAccuracy(bestMonth[1].pass,bestMonth[1].fail)*100) + '% accuracy', 'up', 'Top'),
+    kpiCard('Best Month', monthYearLabel(bestMonth[1].month, bestMonth[1].year), Math.round(calcAccuracy(bestMonth[1].pass,bestMonth[1].fail)*100) + '% accuracy', 'up', 'Top'),
     kpiCard('Avg Monthly Accuracy', overallAcc.toFixed(0) + '%', perfLabel(overallAcc), perfTrend(overallAcc), perfLabel(overallAcc)),
     kpiCard('Total Audited', totalOpp, 'Across all months', null, null)
   ].join('');
@@ -1142,7 +1159,7 @@ function renderMonthly() {
   charts.monthlyBarChart = new Chart(document.getElementById('monthlyBarChart'), {
     type: 'bar',
     data: {
-      labels: months.map(m => m[0]),
+      labels: months.map(m => monthYearLabel(m[1].month, m[1].year)),
       datasets: [
         { label: 'Accuracy %', data: months.map(m => calcAccuracy(m[1].pass,m[1].fail)*100), backgroundColor: COLORS.blue, borderRadius: 6, borderSkipped: false },
         { label: 'Error %', data: months.map(m => calcError(m[1].pass,m[1].fail)*100), backgroundColor: COLORS.red + '80', borderRadius: 6, borderSkipped: false }
@@ -1157,7 +1174,7 @@ function renderMonthly() {
   charts.monthlySampleChart = new Chart(document.getElementById('monthlySampleChart'), {
     type: 'bar',
     data: {
-      labels: months.map(m => m[0]),
+      labels: months.map(m => monthYearLabel(m[1].month, m[1].year)),
       datasets: [
         { label: 'Population', data: months.map(m => m[1].pop), backgroundColor: COLORS.teal + '60', borderRadius: 6 },
         { label: 'Audited', data: months.map(m => m[1].opp), backgroundColor: COLORS.blue, borderRadius: 6 }
@@ -1172,7 +1189,7 @@ function renderMonthly() {
   charts.monthlyErrorChart = new Chart(document.getElementById('monthlyErrorChart'), {
     type: 'line',
     data: {
-      labels: months.map(m => m[0]),
+      labels: months.map(m => monthYearLabel(m[1].month, m[1].year)),
       datasets: [{ label: 'Error Rate %', data: months.map(m => calcError(m[1].pass,m[1].fail)*100), borderColor: COLORS.red, backgroundColor: COLORS.red+'15', fill: true, tension: 0.35, pointRadius: 6, pointBackgroundColor: COLORS.red, pointBorderColor: '#fff', pointBorderWidth: 2, borderWidth: 3 }]
     },
     options: chartOptions('', true, false),
@@ -1184,7 +1201,7 @@ function renderMonthly() {
       const acc = calcAccuracy(m[1].pass,m[1].fail)*100;
       const err = calcError(m[1].pass,m[1].fail)*100;
       const smp = calcSampleRate(m[1].opp,m[1].pop)*100;
-      return [m[0], scoreBadge(acc), scoreBadge(err>0?(100-err):100), smp.toFixed(0)+'%', m[1].pop, m[1].opp, m[1].pass, m[1].fail, m[1].na];
+      return [monthYearLabel(m[1].month, m[1].year), scoreBadge(acc), scoreBadge(err>0?(100-err):100), smp.toFixed(0)+'%', m[1].pop, m[1].opp, m[1].pass, m[1].fail, m[1].na];
     }));
 }
 
@@ -1348,27 +1365,36 @@ function renderRecruiter() {
     plugins: [ChartDataLabels]
   });
 
-  // Recruiter monthly trend
+  // Recruiter monthly trend (chronological Year+Month)
   const recMonthly = {};
   d.forEach(r => {
-    const key = r['Recruiter Name'] + '||' + r['Month'];
-    if (!recMonthly[key]) recMonthly[key] = { pass: 0, fail: 0, rec: r['Recruiter Name'], month: r['Month'] };
+    const yr = r['Financial Year'] || r['Finanical Year'] || '';
+    const key = r['Recruiter Name'] + '||' + yr + '-' + r['Month'];
+    if (!recMonthly[key]) recMonthly[key] = { pass: 0, fail: 0, rec: r['Recruiter Name'], month: r['Month'], year: yr };
     const score = r['Audit Score'];
     if (typeof score === 'number' && !isNaN(score)) {
       if (score >= 1) recMonthly[key].pass++;
       else recMonthly[key].fail++;
     }
   });
-  const allMonths = [...new Set(d.map(r => r['Month']))].sort((a,b) => (MONTH_SORT[a]||99)-(MONTH_SORT[b]||99));
+  // Build chronological month list from recruiter data
+  const recMonthSet = {};
+  d.forEach(r => {
+    const yr = r['Financial Year'] || r['Finanical Year'] || '';
+    const key = yr + '-' + r['Month'];
+    if (!recMonthSet[key]) recMonthSet[key] = { month: r['Month'], year: yr };
+  });
+  const allMonths = Object.values(recMonthSet).sort((a,b) => chronoKey(a.year,a.month) - chronoKey(b.year,b.month));
+  const allMonthLabels = allMonths.map(m => monthYearLabel(m.month, m.year));
 
   destroyChart('recruiterTrendChart');
   charts.recruiterTrendChart = new Chart(document.getElementById('recruiterTrendChart'), {
     type: 'line',
     data: {
-      labels: allMonths,
+      labels: allMonthLabels,
       datasets: topRecruiters.map((rec, i) => ({
         label: rec,
-        data: allMonths.map(m => { const k = rec+'||'+m; return recMonthly[k] ? calcAccuracy(recMonthly[k].pass,recMonthly[k].fail)*100 : null; }),
+        data: allMonths.map(m => { const k = rec+'||'+m.year+'-'+m.month; return recMonthly[k] ? calcAccuracy(recMonthly[k].pass,recMonthly[k].fail)*100 : null; }),
         borderColor: COLORS.palette[i],
         backgroundColor: COLORS.palette[i]+'15',
         tension: 0.35,
