@@ -273,12 +273,12 @@ body { font-family: 'Inter', sans-serif; background: #F7F8FC; color: #172B4D; }
 <div class="upload-overlay" id="uploadOverlay">
   <div class="upload-modal">
     <h2><i class="fas fa-file-upload"></i> Upload Excel Data</h2>
-    <p>Upload a single Excel file (.xlsx) containing both sheets. The system will auto-detect the <strong>Audit</strong> and <strong>Recruiter</strong> sheets by name.</p>
+    <p>Upload a single Excel file (.xlsx) containing both sheets. The system will auto-detect <strong>"Audit Count"</strong> and <strong>"Recruiter Wise Data"</strong> sheets.</p>
     
     <div class="upload-drop-zone" id="uploadDropZone">
       <i class="fas fa-cloud-upload-alt"></i>
       <div class="drop-label">Drag & drop your Excel file here</div>
-      <div class="drop-sub">or click to browse (.xlsx, .xls) &mdash; file should have Audit &amp; Recruiter sheets</div>
+      <div class="drop-sub">or click to browse (.xlsx, .xls) &mdash; Sheets: "Audit Count" &amp; "Recruiter Wise Data"</div>
       <input type="file" id="uploadFileInput" accept=".xlsx,.xls" style="display:none;">
     </div>
     
@@ -546,7 +546,14 @@ function loadData() {
     r['Recruiter Name'] = (r['Recruiter Name']||'').toString().trim();
     r['Parameter'] = (r['Parameter ']||r['Parameter']||'').toString().trim();
     r['Week'] = (r['Week']||'').toString().trim();
-    r['Audit Score'] = parseFloat(r['Audit Score']) || 0;
+    // Audit Score: 1=Pass, 0=Fail, empty/NA=NA (keep as-is, don't coerce empty to 0)
+    const rawScore = r['Audit Score'];
+    if (rawScore === '' || rawScore === null || rawScore === undefined || rawScore === 'NA' || rawScore === '-') {
+      r['Audit Score'] = 'NA';
+    } else {
+      r['Audit Score'] = parseFloat(rawScore);
+      if (isNaN(r['Audit Score'])) r['Audit Score'] = 'NA';
+    }
     r['Financial Year'] = r['Financial Year'];
   });
   
@@ -719,92 +726,138 @@ function generateAIInsights(view) {
     return;
   }
 
-  const avgAccuracy = filteredAudit.reduce((s,r) => s + r['Accuracy Score'], 0) / filteredAudit.length;
-  const avgError = filteredAudit.reduce((s,r) => s + r['Error %'], 0) / filteredAudit.length;
   const totalPass = filteredAudit.reduce((s,r) => s + r['Opportunity Pass'], 0);
   const totalFail = filteredAudit.reduce((s,r) => s + r['Opportunity Fail'], 0);
   const totalOpp = filteredAudit.reduce((s,r) => s + r['Opportunity Count'], 0);
+  const totalPop = filteredAudit.reduce((s,r) => s + r['Total Population'], 0);
+  const accPct = calcAccuracy(totalPass, totalFail) * 100;
+  const errPct = calcError(totalPass, totalFail) * 100;
+  const smpPct = calcSampleRate(totalOpp, totalPop) * 100;
 
-  // Overall accuracy insight
-  if (avgAccuracy >= 0.95) {
-    insights.push({ type: 'success', text: '<strong>Excellent Performance!</strong> Overall accuracy score is <strong>' + (avgAccuracy*100).toFixed(1) + '%</strong>, well above the 95% benchmark. The audit process is highly effective.' });
-  } else if (avgAccuracy >= 0.80) {
-    insights.push({ type: 'warning', text: '<strong>Moderate Performance.</strong> Overall accuracy at <strong>' + (avgAccuracy*100).toFixed(1) + '%</strong>. Some parameters need attention to meet the 95% target.' });
+  // Overall accuracy insight using correct thresholds
+  if (accPct >= 95) {
+    insights.push({ type: 'success', text: '<strong>Excellent Performance!</strong> Overall accuracy is <strong>' + accPct.toFixed(1) + '%</strong> (Pass/(Pass+Fail)), well above the 95% benchmark.' });
+  } else if (accPct >= 85) {
+    insights.push({ type: 'warning', text: '<strong>Good Performance.</strong> Overall accuracy at <strong>' + accPct.toFixed(1) + '%</strong>. Some parameters need attention to reach the 95% Excellent target.' });
   } else {
-    insights.push({ type: 'danger', text: '<strong>Needs Improvement.</strong> Overall accuracy at <strong>' + (avgAccuracy*100).toFixed(1) + '%</strong> is below acceptable thresholds. Immediate corrective action recommended.' });
+    insights.push({ type: 'danger', text: '<strong>Needs Attention.</strong> Overall accuracy at <strong>' + accPct.toFixed(1) + '%</strong> is below 85%. Immediate corrective action recommended.' });
   }
 
   // Failure insight
   if (totalFail > 0) {
-    const failRate = ((totalFail / totalOpp) * 100).toFixed(1);
-    insights.push({ type: 'danger', text: '<strong>Failure Alert:</strong> ' + totalFail + ' opportunities failed out of ' + totalOpp + ' audited (' + failRate + '% failure rate). Investigate root causes in affected parameters.' });
+    insights.push({ type: 'danger', text: '<strong>Failure Alert:</strong> ' + totalFail + ' failed out of ' + (totalPass+totalFail) + ' evaluated (Error Rate: ' + errPct.toFixed(1) + '%). Investigate root causes in affected parameters.' });
   } else {
-    insights.push({ type: 'success', text: '<strong>Zero Failures!</strong> All ' + totalOpp + ' audited opportunities passed. Outstanding compliance across all parameters.' });
+    insights.push({ type: 'success', text: '<strong>Zero Failures!</strong> All ' + totalPass + ' evaluated opportunities passed. Outstanding compliance across all parameters.' });
   }
 
-  // Stage analysis
+  // Sample rate insight
+  insights.push({ type: smpPct >= 40 ? 'success' : 'warning', text: '<strong>Sample Rate:</strong> ' + smpPct.toFixed(1) + '% (' + totalOpp + ' of ' + totalPop + ' population sampled).' + (smpPct < 40 ? ' Consider increasing sample size for better coverage.' : ' Adequate coverage achieved.') });
+
+  // Stage analysis using correct formula
   const stageData = {};
   filteredAudit.forEach(r => {
-    if (!stageData[r['Recruitment Stage']]) stageData[r['Recruitment Stage']] = { sum: 0, count: 0 };
-    stageData[r['Recruitment Stage']].sum += r['Accuracy Score'];
-    stageData[r['Recruitment Stage']].count++;
+    if (!stageData[r['Recruitment Stage']]) stageData[r['Recruitment Stage']] = { pass: 0, fail: 0 };
+    stageData[r['Recruitment Stage']].pass += r['Opportunity Pass'];
+    stageData[r['Recruitment Stage']].fail += r['Opportunity Fail'];
   });
-  let weakestStage = null, weakestScore = 1;
+  let weakestStage = null, weakestScore = 100;
   Object.entries(stageData).forEach(([stage, d]) => {
-    const avg = d.sum / d.count;
-    if (avg < weakestScore) { weakestScore = avg; weakestStage = stage; }
+    const acc = calcAccuracy(d.pass, d.fail) * 100;
+    if (acc < weakestScore) { weakestScore = acc; weakestStage = stage; }
   });
-  if (weakestStage && weakestScore < 0.95) {
-    insights.push({ type: 'warning', text: '<strong>Focus Area:</strong> "' + weakestStage + '" stage has the lowest accuracy at <strong>' + (weakestScore*100).toFixed(1) + '%</strong>. Recommend targeted training and process review.' });
+  if (weakestStage && weakestScore < 95) {
+    insights.push({ type: weakestScore < 85 ? 'danger' : 'warning', text: '<strong>Focus Area:</strong> "' + weakestStage + '" stage has the lowest accuracy at <strong>' + weakestScore.toFixed(1) + '%</strong> (' + perfLabel(weakestScore) + '). Recommend targeted training.' });
   }
 
-  // Recruiter insight
+  // Recruiter insight (Audit Score: 1=Pass, 0=Fail, 'NA'/empty=NA excluded from accuracy)
   if (view === 'recruiter' || view === 'overall') {
     const recData = {};
     filteredRecruiter.forEach(r => {
-      if (!recData[r['Recruiter Name']]) recData[r['Recruiter Name']] = { sum: 0, count: 0 };
-      recData[r['Recruiter Name']].sum += r['Audit Score'];
-      recData[r['Recruiter Name']].count++;
+      const score = r['Audit Score'];
+      if (!recData[r['Recruiter Name']]) recData[r['Recruiter Name']] = { pass: 0, fail: 0, na: 0 };
+      if (score === 'NA' || score === '' || score === '-' || score === null || score === undefined || (typeof score === 'number' && isNaN(score))) {
+        recData[r['Recruiter Name']].na++;
+      } else {
+        const numScore = typeof score === 'number' ? score : parseFloat(score);
+        if (isNaN(numScore)) { recData[r['Recruiter Name']].na++; }
+        else if (numScore >= 1) recData[r['Recruiter Name']].pass++;
+        else recData[r['Recruiter Name']].fail++;
+      }
     });
-    let topRec = null, topScore = 0, lowRec = null, lowScore = 1;
+    let topRec = null, topScore = 0, lowRec = null, lowScore = 100;
     Object.entries(recData).forEach(([name, d]) => {
-      const avg = d.sum / d.count;
-      if (avg >= topScore) { topScore = avg; topRec = name; }
-      if (avg <= lowScore) { lowScore = avg; lowRec = name; }
+      const acc = calcAccuracy(d.pass, d.fail) * 100;
+      if (acc >= topScore) { topScore = acc; topRec = name; }
+      if (acc <= lowScore) { lowScore = acc; lowRec = name; }
     });
-    if (topRec) insights.push({ type: 'success', text: '<strong>Top Performer:</strong> <strong>' + topRec + '</strong> leads with an average audit score of <strong>' + (topScore*100).toFixed(1) + '%</strong>. Recognize and share best practices.' });
-    if (lowRec && lowScore < 0.9 && lowRec !== topRec) insights.push({ type: 'warning', text: '<strong>Coaching Needed:</strong> <strong>' + lowRec + '</strong> has the lowest average score at <strong>' + (lowScore*100).toFixed(1) + '%</strong>. Consider a 1-on-1 improvement plan.' });
+    if (topRec) insights.push({ type: 'success', text: '<strong>Top Performer:</strong> <strong>' + topRec + '</strong> leads with accuracy of <strong>' + topScore.toFixed(1) + '%</strong> (' + perfLabel(topScore) + ').' });
+    if (lowRec && lowScore < 85 && lowRec !== topRec) insights.push({ type: 'danger', text: '<strong>Coaching Needed:</strong> <strong>' + lowRec + '</strong> has the lowest accuracy at <strong>' + lowScore.toFixed(1) + '%</strong> (Needs Attention). Consider a 1-on-1 improvement plan.' });
   }
 
-  // Monthly trend insight
+  // Monthly trend insight using correct formula
   const monthData = {};
   filteredAudit.forEach(r => {
     const key = r['Month'];
-    if (!monthData[key]) monthData[key] = { sum: 0, count: 0 };
-    monthData[key].sum += r['Accuracy Score'];
-    monthData[key].count++;
+    if (!monthData[key]) monthData[key] = { pass: 0, fail: 0 };
+    monthData[key].pass += r['Opportunity Pass'];
+    monthData[key].fail += r['Opportunity Fail'];
   });
   const monthEntries = Object.entries(monthData).sort((a,b) => (MONTH_SORT[a[0]]||99) - (MONTH_SORT[b[0]]||99));
   if (monthEntries.length >= 2) {
     const last = monthEntries[monthEntries.length-1];
     const prev = monthEntries[monthEntries.length-2];
-    const lastAvg = last[1].sum / last[1].count;
-    const prevAvg = prev[1].sum / prev[1].count;
-    const change = ((lastAvg - prevAvg)*100).toFixed(1);
+    const lastAcc = calcAccuracy(last[1].pass, last[1].fail) * 100;
+    const prevAcc = calcAccuracy(prev[1].pass, prev[1].fail) * 100;
+    const change = (lastAcc - prevAcc).toFixed(1);
     if (parseFloat(change) > 0) {
-      insights.push({ type: 'success', text: '<strong>Positive Trend:</strong> Accuracy improved by <strong>+' + change + '%</strong> from ' + prev[0] + ' to ' + last[0] + '. The improvement initiatives are yielding results.' });
+      insights.push({ type: 'success', text: '<strong>Positive Trend:</strong> Accuracy improved by <strong>+' + change + '%</strong> from ' + prev[0] + ' (' + prevAcc.toFixed(1) + '%) to ' + last[0] + ' (' + lastAcc.toFixed(1) + '%).' });
     } else if (parseFloat(change) < 0) {
-      insights.push({ type: 'danger', text: '<strong>Declining Trend:</strong> Accuracy dropped by <strong>' + change + '%</strong> from ' + prev[0] + ' to ' + last[0] + '. Root cause analysis recommended.' });
+      insights.push({ type: 'danger', text: '<strong>Declining Trend:</strong> Accuracy dropped by <strong>' + change + '%</strong> from ' + prev[0] + ' (' + prevAcc.toFixed(1) + '%) to ' + last[0] + ' (' + lastAcc.toFixed(1) + '%). Root cause analysis recommended.' });
     }
   }
 
   container.innerHTML = insights.map(i => '<div class="ai-card ' + i.type + '">' + i.text + '</div>').join('');
 }
 
+// ============ METRIC FORMULAS (as per spec) ============
+// Accuracy % = Pass / (Pass + Fail) * 100  (exclude NA)
+// Error Rate % = Fail / (Pass + Fail) * 100
+// Sample Rate % = Opportunity Count / Total Population * 100
+function calcAccuracy(pass, fail) {
+  const denom = pass + fail;
+  return denom > 0 ? pass / denom : 0;
+}
+function calcError(pass, fail) {
+  const denom = pass + fail;
+  return denom > 0 ? fail / denom : 0;
+}
+function calcSampleRate(count, population) {
+  return population > 0 ? count / population : 0;
+}
+
+// Performance Thresholds:
+// Excellent: >= 95%  |  Good: 85% - 94.9%  |  Needs Attention: < 85%
+function perfLevel(accPct) {
+  if (accPct >= 95) return 'excellent';
+  if (accPct >= 85) return 'good';
+  return 'attention';
+}
+function perfTrend(accPct) {
+  if (accPct >= 95) return 'up';
+  if (accPct >= 85) return 'neutral';
+  return 'down';
+}
+function perfLabel(accPct) {
+  if (accPct >= 95) return 'Excellent';
+  if (accPct >= 85) return 'Good';
+  return 'Needs Attention';
+}
+
 // ============ CHART HELPERS ============
 function destroyChart(id) { if(charts[id]) { charts[id].destroy(); delete charts[id]; } }
 
 function pct(v) { return (v * 100).toFixed(1) + '%'; }
+function pctVal(v) { return (v * 100).toFixed(1); }
 
 const DATALABEL_DEFAULTS = {
   display: true,
@@ -833,7 +886,7 @@ function chartOptions(title, yPct, showLegend) {
       tooltip: { backgroundColor: '#172B4D', titleFont: { size: 12, weight: '600' }, bodyFont: { size: 11 }, padding: 10, cornerRadius: 8 }
     },
     scales: {
-      y: { beginAtZero: true, max: yPct ? 1.05 : undefined, ticks: { callback: yPct ? (v) => (v*100)+'%' : undefined, font: { size: 11 } }, grid: { color: '#F0F0F0' } },
+      y: { beginAtZero: true, max: yPct ? 105 : undefined, ticks: { callback: yPct ? (v) => v+'%' : undefined, font: { size: 11 } }, grid: { color: '#F0F0F0' } },
       x: { ticks: { font: { size: 10 }, maxRotation: 45 }, grid: { display: false } }
     }
   };
@@ -846,10 +899,11 @@ function shortLabel(s, max) {
 
 function scoreBadge(v) {
   const n = parseFloat(v);
-  if (isNaN(n) || v === '-' || v === '') return '<span class="score-badge score-mid">N/A</span>';
-  if (n >= 0.95) return '<span class="score-badge score-high">' + (n*100).toFixed(1) + '%</span>';
-  if (n >= 0.80) return '<span class="score-badge score-mid">' + (n*100).toFixed(1) + '%</span>';
-  return '<span class="score-badge score-low">' + (n*100).toFixed(1) + '%</span>';
+  if (isNaN(n) || v === '-' || v === '' || v === 'N/A') return '<span class="score-badge score-mid">N/A</span>';
+  // v is already a percentage number (0-100)
+  if (n >= 95) return '<span class="score-badge score-high">' + n.toFixed(1) + '%</span>';
+  if (n >= 85) return '<span class="score-badge score-mid">' + n.toFixed(1) + '%</span>';
+  return '<span class="score-badge score-low">' + n.toFixed(1) + '%</span>';
 }
 
 // ============ RENDER: OVERALL ============
@@ -862,25 +916,29 @@ function renderOverall() {
   const totalPass = d.reduce((s,r) => s + r['Opportunity Pass'], 0);
   const totalFail = d.reduce((s,r) => s + r['Opportunity Fail'], 0);
   const totalNA = d.reduce((s,r) => s + r['Opportunity NA'], 0);
-  const avgAcc = d.reduce((s,r) => s + r['Accuracy Score'], 0) / d.length;
-  const avgErr = d.reduce((s,r) => s + r['Error %'], 0) / d.length;
+  const accPct = calcAccuracy(totalPass, totalFail) * 100;
+  const errPct = calcError(totalPass, totalFail) * 100;
+  const samplePct = calcSampleRate(totalOpp, totalPop) * 100;
 
   document.getElementById('overallKpis').innerHTML = [
-    kpiCard('Overall Accuracy', pct(avgAcc), 'Target: 95%', avgAcc >= 0.95 ? 'up' : avgAcc >= 0.8 ? 'neutral' : 'down', avgAcc >= 0.95 ? 'On Track' : 'Below Target'),
+    kpiCard('Overall Accuracy', accPct.toFixed(1) + '%', 'Target: 95% | ' + perfLabel(accPct), perfTrend(accPct), perfLabel(accPct)),
     kpiCard('Total Population', totalPop, 'Across all stages', null, null),
-    kpiCard('Audited Opportunities', totalOpp, pct(totalOpp/totalPop) + ' sample rate', null, null),
-    kpiCard('Pass Rate', pct(totalPass/totalOpp), totalPass + ' of ' + totalOpp + ' passed', totalPass/totalOpp >= 0.95 ? 'up' : 'neutral', pct(totalPass/totalOpp)),
+    kpiCard('Sample Rate', samplePct.toFixed(1) + '%', totalOpp + ' of ' + totalPop + ' sampled', null, null),
+    kpiCard('Pass', totalPass, 'Out of ' + (totalPass+totalFail) + ' evaluated', null, null),
     kpiCard('Failures', totalFail, totalFail === 0 ? 'Zero defects!' : 'Needs attention', totalFail === 0 ? 'up' : 'down', totalFail === 0 ? 'Clean' : totalFail + ' issues'),
-    kpiCard('Avg Error %', pct(avgErr), avgErr === 0 ? 'No errors detected' : 'Investigate causes', avgErr === 0 ? 'up' : 'down', avgErr === 0 ? 'Perfect' : 'Alert')
+    kpiCard('Error Rate', errPct.toFixed(1) + '%', errPct === 0 ? 'No errors detected' : 'Investigate causes', errPct === 0 ? 'up' : 'down', errPct === 0 ? 'Perfect' : 'Alert')
   ].join('');
 
-  // Trend chart - accuracy over months
+  // Trend chart - accuracy over months using correct formula
   const monthGroups = {};
   d.forEach(r => {
     const key = r['Finanical Year'] + '-' + r['Month'];
-    if (!monthGroups[key]) monthGroups[key] = { sum: 0, count: 0, month: r['Month'], year: r['Finanical Year'], monthNum: r['MonthNumber'] };
-    monthGroups[key].sum += r['Accuracy Score'];
-    monthGroups[key].count++;
+    if (!monthGroups[key]) monthGroups[key] = { pass: 0, fail: 0, na: 0, pop: 0, opp: 0, month: r['Month'], year: r['Finanical Year'], monthNum: r['MonthNumber'] };
+    monthGroups[key].pass += r['Opportunity Pass'];
+    monthGroups[key].fail += r['Opportunity Fail'];
+    monthGroups[key].na += r['Opportunity NA'];
+    monthGroups[key].pop += r['Total Population'];
+    monthGroups[key].opp += r['Opportunity Count'];
   });
   const trend = Object.values(monthGroups).sort((a,b) => a.year === b.year ? (MONTH_SORT[a.month]||99)-(MONTH_SORT[b.month]||99) : a.year-b.year);
 
@@ -890,8 +948,8 @@ function renderOverall() {
     data: {
       labels: trend.map(t => t.month + ' ' + t.year),
       datasets: [{
-        label: 'Accuracy Score',
-        data: trend.map(t => t.sum/t.count),
+        label: 'Accuracy %',
+        data: trend.map(t => calcAccuracy(t.pass, t.fail) * 100),
         borderColor: COLORS.blue,
         backgroundColor: COLORS.blue + '20',
         fill: true,
@@ -903,7 +961,7 @@ function renderOverall() {
         borderWidth: 3
       }]
     },
-    options: chartOptions('', true, false),
+    options: {...chartOptions('', true, false), scales: {...chartOptions('',true,false).scales, y: {beginAtZero:true, max:105, ticks:{callback:(v)=>v+'%',font:{size:11}}, grid:{color:'#F0F0F0'}}}},
     plugins: [ChartDataLabels]
   });
 
@@ -928,9 +986,9 @@ function renderOverall() {
   // Stage bar chart
   const stageGroups = {};
   d.forEach(r => {
-    if (!stageGroups[r['Recruitment Stage']]) stageGroups[r['Recruitment Stage']] = { sum: 0, count: 0 };
-    stageGroups[r['Recruitment Stage']].sum += r['Accuracy Score'];
-    stageGroups[r['Recruitment Stage']].count++;
+    if (!stageGroups[r['Recruitment Stage']]) stageGroups[r['Recruitment Stage']] = { pass: 0, fail: 0 };
+    stageGroups[r['Recruitment Stage']].pass += r['Opportunity Pass'];
+    stageGroups[r['Recruitment Stage']].fail += r['Opportunity Fail'];
   });
   const stages = Object.entries(stageGroups);
 
@@ -939,17 +997,14 @@ function renderOverall() {
     type: 'bar',
     data: {
       labels: stages.map(s => shortLabel(s[0], 20)),
-      datasets: [{ label: 'Avg Accuracy', data: stages.map(s => s[1].sum/s[1].count), backgroundColor: stages.map((s,i) => COLORS.palette[i % COLORS.palette.length]), borderRadius: 6, borderSkipped: false }]
+      datasets: [{ label: 'Accuracy %', data: stages.map(s => calcAccuracy(s[1].pass, s[1].fail) * 100), backgroundColor: stages.map((s,i) => COLORS.palette[i % COLORS.palette.length]), borderRadius: 6, borderSkipped: false }]
     },
     options: chartOptions('', true, false),
     plugins: [ChartDataLabels]
   });
 
-  // Error trend
-  const errTrend = trend.map(t => {
-    const rows = d.filter(r => r['Finanical Year']===t.year && r['Month']===t.month);
-    return rows.reduce((s,r) => s + r['Error %'], 0) / rows.length;
-  });
+  // Error trend using correct formula
+  const errTrend = trend.map(t => calcError(t.pass, t.fail) * 100);
   destroyChart('errorTrendChart');
   charts.errorTrendChart = new Chart(document.getElementById('errorTrendChart'), {
     type: 'line',
@@ -973,9 +1028,14 @@ function renderOverall() {
     plugins: [ChartDataLabels]
   });
 
-  // Table
-  renderTable('overallTable', ['Month','Year','Stage','Parameter','Population','Audited','Pass','Fail','NA','Accuracy','Error %'],
-    d.map(r => [r['Month'], r['Finanical Year'], r['Recruitment Stage'], shortLabel(r['Parameter'],35), r['Total Population'], r['Opportunity Count'], r['Opportunity Pass'], r['Opportunity Fail'], r['Opportunity NA'], scoreBadge(r['Accuracy Score']), scoreBadge(1-r['Error %'])]));
+  // Table with correct formulas
+  renderTable('overallTable', ['Month','Year','Stage','Parameter','Population','Audited','Pass','Fail','NA','Accuracy %','Error %','Sample %'],
+    d.map(r => {
+      const acc = calcAccuracy(r['Opportunity Pass'], r['Opportunity Fail']) * 100;
+      const err = calcError(r['Opportunity Pass'], r['Opportunity Fail']) * 100;
+      const smp = calcSampleRate(r['Opportunity Count'], r['Total Population']) * 100;
+      return [r['Month'], r['Finanical Year'], r['Recruitment Stage'], shortLabel(r['Parameter'],35), r['Total Population'], r['Opportunity Count'], r['Opportunity Pass'], r['Opportunity Fail'], r['Opportunity NA'], scoreBadge(acc), scoreBadge(err > 0 ? (100-err) : 100), smp.toFixed(1)+'%'];
+    }));
 }
 
 function kpiCard(label, value, sub, trendDir, trendText) {
@@ -995,21 +1055,23 @@ function renderMonthly() {
   const monthGroups = {};
   d.forEach(r => {
     const key = r['Month'];
-    if (!monthGroups[key]) monthGroups[key] = { sum: 0, count: 0, pop: 0, opp: 0, pass: 0, fail: 0, na: 0, err: 0 };
+    if (!monthGroups[key]) monthGroups[key] = { pop: 0, opp: 0, pass: 0, fail: 0, na: 0 };
     const g = monthGroups[key];
-    g.sum += r['Accuracy Score']; g.count++; g.pop += r['Total Population']; g.opp += r['Opportunity Count'];
-    g.pass += r['Opportunity Pass']; g.fail += r['Opportunity Fail']; g.na += r['Opportunity NA']; g.err += r['Error %'];
+    g.pop += r['Total Population']; g.opp += r['Opportunity Count'];
+    g.pass += r['Opportunity Pass']; g.fail += r['Opportunity Fail']; g.na += r['Opportunity NA'];
   });
   const months = Object.entries(monthGroups).sort((a,b) => (MONTH_SORT[a[0]]||99)-(MONTH_SORT[b[0]]||99));
   
-  const bestMonth = months.reduce((best, m) => (m[1].sum/m[1].count > best[1].sum/best[1].count) ? m : best, months[0]);
+  const bestMonth = months.reduce((best, m) => (calcAccuracy(m[1].pass,m[1].fail) > calcAccuracy(best[1].pass,best[1].fail)) ? m : best, months[0]);
   const totalOpp = months.reduce((s,m) => s + m[1].opp, 0);
-  const overallAcc = months.reduce((s,m) => s + m[1].sum, 0) / months.reduce((s,m) => s + m[1].count, 0);
+  const allPass = months.reduce((s,m) => s + m[1].pass, 0);
+  const allFail = months.reduce((s,m) => s + m[1].fail, 0);
+  const overallAcc = calcAccuracy(allPass, allFail) * 100;
 
   document.getElementById('monthlyKpis').innerHTML = [
     kpiCard('Months Analyzed', months.length, 'Across selected filters', null, null),
-    kpiCard('Best Month', bestMonth[0], pct(bestMonth[1].sum/bestMonth[1].count) + ' accuracy', 'up', 'Top'),
-    kpiCard('Avg Monthly Accuracy', pct(overallAcc), 'Across all months', overallAcc >= 0.95 ? 'up' : 'neutral', overallAcc >= 0.95 ? 'On Target' : 'Below Target'),
+    kpiCard('Best Month', bestMonth[0], (calcAccuracy(bestMonth[1].pass,bestMonth[1].fail)*100).toFixed(1) + '% accuracy', 'up', 'Top'),
+    kpiCard('Avg Monthly Accuracy', overallAcc.toFixed(1) + '%', perfLabel(overallAcc), perfTrend(overallAcc), perfLabel(overallAcc)),
     kpiCard('Total Audited', totalOpp, 'Across all months', null, null)
   ].join('');
 
@@ -1020,8 +1082,8 @@ function renderMonthly() {
     data: {
       labels: months.map(m => m[0]),
       datasets: [
-        { label: 'Accuracy', data: months.map(m => m[1].sum/m[1].count), backgroundColor: COLORS.blue, borderRadius: 6, borderSkipped: false },
-        { label: 'Error %', data: months.map(m => m[1].err/m[1].count), backgroundColor: COLORS.red + '80', borderRadius: 6, borderSkipped: false }
+        { label: 'Accuracy %', data: months.map(m => calcAccuracy(m[1].pass,m[1].fail)*100), backgroundColor: COLORS.blue, borderRadius: 6, borderSkipped: false },
+        { label: 'Error %', data: months.map(m => calcError(m[1].pass,m[1].fail)*100), backgroundColor: COLORS.red + '80', borderRadius: 6, borderSkipped: false }
       ]
     },
     options: chartOptions('', true, true),
@@ -1049,14 +1111,19 @@ function renderMonthly() {
     type: 'line',
     data: {
       labels: months.map(m => m[0]),
-      datasets: [{ label: 'Avg Error %', data: months.map(m => m[1].err/m[1].count), borderColor: COLORS.red, backgroundColor: COLORS.red+'15', fill: true, tension: 0.35, pointRadius: 6, pointBackgroundColor: COLORS.red, pointBorderColor: '#fff', pointBorderWidth: 2, borderWidth: 3 }]
+      datasets: [{ label: 'Error Rate %', data: months.map(m => calcError(m[1].pass,m[1].fail)*100), borderColor: COLORS.red, backgroundColor: COLORS.red+'15', fill: true, tension: 0.35, pointRadius: 6, pointBackgroundColor: COLORS.red, pointBorderColor: '#fff', pointBorderWidth: 2, borderWidth: 3 }]
     },
     options: chartOptions('', true, false),
     plugins: [ChartDataLabels]
   });
 
-  renderTable('monthlyTable', ['Month','Avg Accuracy','Avg Error %','Population','Audited','Pass','Fail','NA'],
-    months.map(m => [m[0], scoreBadge(m[1].sum/m[1].count), scoreBadge(1-m[1].err/m[1].count), m[1].pop, m[1].opp, m[1].pass, m[1].fail, m[1].na]));
+  renderTable('monthlyTable', ['Month','Accuracy %','Error %','Sample %','Population','Audited','Pass','Fail','NA'],
+    months.map(m => {
+      const acc = calcAccuracy(m[1].pass,m[1].fail)*100;
+      const err = calcError(m[1].pass,m[1].fail)*100;
+      const smp = calcSampleRate(m[1].opp,m[1].pop)*100;
+      return [m[0], scoreBadge(acc), scoreBadge(err>0?(100-err):100), smp.toFixed(1)+'%', m[1].pop, m[1].opp, m[1].pass, m[1].fail, m[1].na];
+    }));
 }
 
 // ============ RENDER: YEARLY ============
@@ -1067,25 +1134,25 @@ function renderYearly() {
   const yearGroups = {};
   d.forEach(r => {
     const key = String(r['Finanical Year']);
-    if (!yearGroups[key]) yearGroups[key] = { sum: 0, count: 0, pop: 0, opp: 0, pass: 0, fail: 0, na: 0, err: 0 };
+    if (!yearGroups[key]) yearGroups[key] = { pop: 0, opp: 0, pass: 0, fail: 0, na: 0 };
     const g = yearGroups[key];
-    g.sum += r['Accuracy Score']; g.count++; g.pop += r['Total Population']; g.opp += r['Opportunity Count'];
-    g.pass += r['Opportunity Pass']; g.fail += r['Opportunity Fail']; g.na += r['Opportunity NA']; g.err += r['Error %'];
+    g.pop += r['Total Population']; g.opp += r['Opportunity Count'];
+    g.pass += r['Opportunity Pass']; g.fail += r['Opportunity Fail']; g.na += r['Opportunity NA'];
   });
   const years = Object.entries(yearGroups).sort((a,b) => a[0]-b[0]);
 
   document.getElementById('yearlyKpis').innerHTML = [
     kpiCard('Years Covered', years.length, years.map(y=>y[0]).join(', '), null, null),
-    ...years.map(y => kpiCard('FY ' + y[0] + ' Accuracy', pct(y[1].sum/y[1].count), y[1].opp + ' audited', y[1].sum/y[1].count >= 0.95 ? 'up' : 'neutral', pct(y[1].sum/y[1].count)))
+    ...years.map(y => { const acc = calcAccuracy(y[1].pass,y[1].fail)*100; return kpiCard('FY ' + y[0] + ' Accuracy', acc.toFixed(1)+'%', y[1].opp + ' audited | ' + perfLabel(acc), perfTrend(acc), perfLabel(acc)); })
   ].join('');
 
   // Yearly stage chart
   const yearStage = {};
   d.forEach(r => {
     const key = r['Finanical Year'] + '||' + r['Recruitment Stage'];
-    if (!yearStage[key]) yearStage[key] = { sum: 0, count: 0, year: String(r['Finanical Year']), stage: r['Recruitment Stage'] };
-    yearStage[key].sum += r['Accuracy Score'];
-    yearStage[key].count++;
+    if (!yearStage[key]) yearStage[key] = { pass: 0, fail: 0, year: String(r['Finanical Year']), stage: r['Recruitment Stage'] };
+    yearStage[key].pass += r['Opportunity Pass'];
+    yearStage[key].fail += r['Opportunity Fail'];
   });
   const uniqueStages = [...new Set(d.map(r => r['Recruitment Stage']))];
   const yearLabels = years.map(y => y[0]);
@@ -1097,7 +1164,7 @@ function renderYearly() {
       labels: yearLabels,
       datasets: uniqueStages.map((stage, i) => ({
         label: shortLabel(stage, 22),
-        data: yearLabels.map(yr => { const k = yr+'||'+stage; return yearStage[k] ? yearStage[k].sum/yearStage[k].count : 0; }),
+        data: yearLabels.map(yr => { const k = yr+'||'+stage; return yearStage[k] ? calcAccuracy(yearStage[k].pass,yearStage[k].fail)*100 : 0; }),
         backgroundColor: COLORS.palette[i % COLORS.palette.length],
         borderRadius: 4, borderSkipped: false
       }))
@@ -1131,8 +1198,13 @@ function renderYearly() {
     plugins: [ChartDataLabels]
   });
 
-  renderTable('yearlyTable', ['Year','Avg Accuracy','Avg Error %','Population','Audited','Pass','Fail','NA'],
-    years.map(y => [y[0], scoreBadge(y[1].sum/y[1].count), scoreBadge(1-y[1].err/y[1].count), y[1].pop, y[1].opp, y[1].pass, y[1].fail, y[1].na]));
+  renderTable('yearlyTable', ['Year','Accuracy %','Error %','Sample %','Population','Audited','Pass','Fail','NA'],
+    years.map(y => {
+      const acc = calcAccuracy(y[1].pass,y[1].fail)*100;
+      const err = calcError(y[1].pass,y[1].fail)*100;
+      const smp = calcSampleRate(y[1].opp,y[1].pop)*100;
+      return [y[0], scoreBadge(acc), scoreBadge(err>0?(100-err):100), smp.toFixed(1)+'%', y[1].pop, y[1].opp, y[1].pass, y[1].fail, y[1].na];
+    }));
 }
 
 // ============ RENDER: RECRUITER ============
@@ -1140,31 +1212,47 @@ function renderRecruiter() {
   const d = filteredRecruiter;
   if (!d.length) return;
 
+  // Build recruiter groups with Pass/Fail/NA counts (Score: 1=Pass, 0=Fail, 'NA'/empty=NA)
   const recGroups = {};
   d.forEach(r => {
-    if (!recGroups[r['Recruiter Name']]) recGroups[r['Recruiter Name']] = { sum: 0, count: 0 };
-    recGroups[r['Recruiter Name']].sum += r['Audit Score'];
-    recGroups[r['Recruiter Name']].count++;
+    const name = r['Recruiter Name'];
+    if (!recGroups[name]) recGroups[name] = { pass: 0, fail: 0, na: 0, total: 0 };
+    const score = r['Audit Score'];
+    recGroups[name].total++;
+    if (score === 'NA' || score === '' || score === '-' || score === null || score === undefined || (typeof score === 'number' && isNaN(score))) {
+      recGroups[name].na++;
+    } else {
+      const numScore = typeof score === 'number' ? score : parseFloat(score);
+      if (isNaN(numScore)) { recGroups[name].na++; }
+      else if (numScore >= 1) { recGroups[name].pass++; }
+      else { recGroups[name].fail++; }
+    }
   });
-  const recs = Object.entries(recGroups).sort((a,b) => b[1].sum/b[1].count - a[1].sum/a[1].count);
+  const recs = Object.entries(recGroups).sort((a,b) => calcAccuracy(b[1].pass,b[1].fail) - calcAccuracy(a[1].pass,a[1].fail));
 
   const topRec = recs[0];
-  const avgScore = recs.reduce((s,r)=> s + r[1].sum/r[1].count, 0) / recs.length;
+  const topAcc = calcAccuracy(topRec[1].pass, topRec[1].fail) * 100;
+  const allPass = recs.reduce((s,r) => s+r[1].pass, 0);
+  const allFail = recs.reduce((s,r) => s+r[1].fail, 0);
+  const avgAcc = calcAccuracy(allPass, allFail) * 100;
 
   document.getElementById('recruiterKpis').innerHTML = [
     kpiCard('Total Recruiters', recs.length, 'Under review', null, null),
-    kpiCard('Top Performer', topRec[0], pct(topRec[1].sum/topRec[1].count) + ' avg score', 'up', 'Best'),
-    kpiCard('Avg Score', pct(avgScore), 'Across all recruiters', avgScore >= 0.95 ? 'up' : 'neutral', pct(avgScore)),
+    kpiCard('Top Performer', topRec[0], topAcc.toFixed(1) + '% accuracy | ' + perfLabel(topAcc), 'up', perfLabel(topAcc)),
+    kpiCard('Avg Accuracy', avgAcc.toFixed(1) + '%', perfLabel(avgAcc), perfTrend(avgAcc), perfLabel(avgAcc)),
     kpiCard('Total Audits', d.length, 'Individual audit entries', null, null)
   ].join('');
 
-  // Bar chart
+  // Bar chart - accuracy per recruiter
   destroyChart('recruiterBarChart');
   charts.recruiterBarChart = new Chart(document.getElementById('recruiterBarChart'), {
     type: 'bar',
     data: {
       labels: recs.map(r => r[0]),
-      datasets: [{ label: 'Avg Audit Score', data: recs.map(r => r[1].sum/r[1].count), backgroundColor: recs.map((r,i)=> COLORS.palette[i % COLORS.palette.length]), borderRadius: 8, borderSkipped: false }]
+      datasets: [{ label: 'Accuracy %', data: recs.map(r => calcAccuracy(r[1].pass,r[1].fail)*100), backgroundColor: recs.map((r,i) => {
+        const acc = calcAccuracy(r[1].pass,r[1].fail)*100;
+        return acc >= 95 ? COLORS.green : acc >= 85 ? COLORS.yellow : COLORS.red;
+      }), borderRadius: 8, borderSkipped: false }]
     },
     options: chartOptions('', true, false),
     plugins: [ChartDataLabels]
@@ -1182,7 +1270,10 @@ function renderRecruiter() {
       datasets: topRecruiters.map((rec, i) => {
         const scores = params.map(p => {
           const entries = d.filter(r => r['Recruiter Name'] === rec && r['Parameter'] === p);
-          return entries.length ? entries.reduce((s,r) => s + r['Audit Score'], 0)/entries.length : 0;
+          if (!entries.length) return 0;
+          const pass = entries.filter(e => typeof e['Audit Score'] === 'number' && e['Audit Score'] >= 1).length;
+          const fail = entries.filter(e => typeof e['Audit Score'] === 'number' && e['Audit Score'] === 0).length;
+          return calcAccuracy(pass, fail) * 100;
         });
         return { label: rec, data: scores, borderColor: COLORS.palette[i], backgroundColor: COLORS.palette[i]+'25', borderWidth: 2, pointRadius: 4, pointBackgroundColor: COLORS.palette[i] };
       })
@@ -1190,7 +1281,7 @@ function renderRecruiter() {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { position: 'top', labels: { font: { size: 11, weight: '500' }, usePointStyle: true } }, datalabels: { display: false } },
-      scales: { r: { min: 0, max: 1, ticks: { stepSize: 0.2, callback: (v) => (v*100)+'%', font: { size: 9 } }, pointLabels: { font: { size: 9 } } } }
+      scales: { r: { min: 0, max: 100, ticks: { stepSize: 20, callback: (v) => v+'%', font: { size: 9 } }, pointLabels: { font: { size: 9 } } } }
     },
     plugins: [ChartDataLabels]
   });
@@ -1199,9 +1290,12 @@ function renderRecruiter() {
   const recMonthly = {};
   d.forEach(r => {
     const key = r['Recruiter Name'] + '||' + r['Month'];
-    if (!recMonthly[key]) recMonthly[key] = { sum: 0, count: 0, rec: r['Recruiter Name'], month: r['Month'] };
-    recMonthly[key].sum += r['Audit Score'];
-    recMonthly[key].count++;
+    if (!recMonthly[key]) recMonthly[key] = { pass: 0, fail: 0, rec: r['Recruiter Name'], month: r['Month'] };
+    const score = r['Audit Score'];
+    if (typeof score === 'number' && !isNaN(score)) {
+      if (score >= 1) recMonthly[key].pass++;
+      else recMonthly[key].fail++;
+    }
   });
   const allMonths = [...new Set(d.map(r => r['Month']))].sort((a,b) => (MONTH_SORT[a]||99)-(MONTH_SORT[b]||99));
 
@@ -1212,7 +1306,7 @@ function renderRecruiter() {
       labels: allMonths,
       datasets: topRecruiters.map((rec, i) => ({
         label: rec,
-        data: allMonths.map(m => { const k = rec+'||'+m; return recMonthly[k] ? recMonthly[k].sum/recMonthly[k].count : null; }),
+        data: allMonths.map(m => { const k = rec+'||'+m; return recMonthly[k] ? calcAccuracy(recMonthly[k].pass,recMonthly[k].fail)*100 : null; }),
         borderColor: COLORS.palette[i],
         backgroundColor: COLORS.palette[i]+'15',
         tension: 0.35,
@@ -1228,20 +1322,12 @@ function renderRecruiter() {
     plugins: [ChartDataLabels]
   });
 
-  // Table
-  const tableData = [];
-  recs.forEach(([name, data]) => {
-    const paramScores = {};
-    d.filter(r => r['Recruiter Name'] === name).forEach(r => {
-      if (!paramScores[r['Parameter']]) paramScores[r['Parameter']] = { sum: 0, count: 0 };
-      paramScores[r['Parameter']].sum += r['Audit Score'];
-      paramScores[r['Parameter']].count++;
-    });
-    Object.entries(paramScores).forEach(([param, ps]) => {
-      tableData.push([name, shortLabel(param, 35), ps.count, scoreBadge(ps.sum/ps.count)]);
-    });
-  });
-  renderTable('recruiterTable', ['Recruiter','Parameter','Audits','Avg Score'], tableData);
+  // Table: Recruiter Name | Total Pass | Fail | NA | Accuracy %
+  renderTable('recruiterTable', ['Recruiter','Total Pass','Total Fail','Total NA','Total Audits','Accuracy %','Status'],
+    recs.map(([name, data]) => {
+      const acc = calcAccuracy(data.pass, data.fail) * 100;
+      return [name, data.pass, data.fail, data.na, data.total, scoreBadge(acc), '<span class="score-badge ' + (acc >= 95 ? 'score-high' : acc >= 85 ? 'score-mid' : 'score-low') + '">' + perfLabel(acc) + '</span>'];
+    }));
 }
 
 // ============ RENDER: PARAMETER ============
@@ -1251,32 +1337,35 @@ function renderParameter() {
 
   const paramGroups = {};
   d.forEach(r => {
-    if (!paramGroups[r['Parameter']]) paramGroups[r['Parameter']] = { sum: 0, count: 0, pop: 0, opp: 0, pass: 0, fail: 0, na: 0, err: 0 };
+    if (!paramGroups[r['Parameter']]) paramGroups[r['Parameter']] = { pop: 0, opp: 0, pass: 0, fail: 0, na: 0 };
     const g = paramGroups[r['Parameter']];
-    g.sum += r['Accuracy Score']; g.count++; g.pop += r['Total Population']; g.opp += r['Opportunity Count'];
-    g.pass += r['Opportunity Pass']; g.fail += r['Opportunity Fail']; g.na += r['Opportunity NA']; g.err += r['Error %'];
+    g.pop += r['Total Population']; g.opp += r['Opportunity Count'];
+    g.pass += r['Opportunity Pass']; g.fail += r['Opportunity Fail']; g.na += r['Opportunity NA'];
   });
   const params = Object.entries(paramGroups);
-  const best = params.reduce((best, p) => (p[1].sum/p[1].count > best[1].sum/best[1].count) ? p : best, params[0]);
-  const avgAcc = params.reduce((s,p) => s + p[1].sum/p[1].count, 0) / params.length;
+  const best = params.reduce((best, p) => (calcAccuracy(p[1].pass,p[1].fail) > calcAccuracy(best[1].pass,best[1].fail)) ? p : best, params[0]);
+  const allPass = params.reduce((s,p)=>s+p[1].pass,0);
+  const allFail = params.reduce((s,p)=>s+p[1].fail,0);
+  const avgAccPct = calcAccuracy(allPass, allFail) * 100;
+  const bestAccPct = calcAccuracy(best[1].pass, best[1].fail) * 100;
 
   document.getElementById('parameterKpis').innerHTML = [
     kpiCard('Parameters Tracked', params.length, 'Across all stages', null, null),
-    kpiCard('Best Parameter', shortLabel(best[0],20), pct(best[1].sum/best[1].count) + ' accuracy', 'up', 'Top'),
-    kpiCard('Avg Parameter Accuracy', pct(avgAcc), 'Across all parameters', avgAcc >= 0.95 ? 'up' : 'neutral', pct(avgAcc)),
+    kpiCard('Best Parameter', shortLabel(best[0],20), bestAccPct.toFixed(1) + '% accuracy | ' + perfLabel(bestAccPct), 'up', 'Top'),
+    kpiCard('Avg Parameter Accuracy', avgAccPct.toFixed(1) + '%', perfLabel(avgAccPct), perfTrend(avgAccPct), perfLabel(avgAccPct)),
     kpiCard('Total Opportunities', params.reduce((s,p)=>s+p[1].opp,0), 'Audited across parameters', null, null)
   ].join('');
 
-  // Horizontal bar
+  // Horizontal bar - accuracy per parameter
   destroyChart('paramBarChart');
-  const sortedParams = [...params].sort((a,b) => a[1].sum/a[1].count - b[1].sum/b[1].count);
+  const sortedParams = [...params].sort((a,b) => calcAccuracy(a[1].pass,a[1].fail) - calcAccuracy(b[1].pass,b[1].fail));
   charts.paramBarChart = new Chart(document.getElementById('paramBarChart'), {
     type: 'bar',
     data: {
       labels: sortedParams.map(p => shortLabel(p[0], 35)),
-      datasets: [{ label: 'Accuracy', data: sortedParams.map(p => p[1].sum/p[1].count), backgroundColor: sortedParams.map(p => { const v = p[1].sum/p[1].count; return v >= 0.95 ? COLORS.green : v >= 0.8 ? COLORS.yellow : COLORS.red; }), borderRadius: 6, borderSkipped: false }]
+      datasets: [{ label: 'Accuracy %', data: sortedParams.map(p => calcAccuracy(p[1].pass,p[1].fail)*100), backgroundColor: sortedParams.map(p => { const v = calcAccuracy(p[1].pass,p[1].fail)*100; return v >= 95 ? COLORS.green : v >= 85 ? COLORS.yellow : COLORS.red; }), borderRadius: 6, borderSkipped: false }]
     },
-    options: { ...chartOptions('', true, false), indexAxis: 'y', scales: { x: { beginAtZero: true, max: 1.05, ticks: { callback: (v) => (v*100)+'%' }, grid: { color: '#F0F0F0' } }, y: { ticks: { font: { size: 10 } }, grid: { display: false } } } },
+    options: { ...chartOptions('', true, false), indexAxis: 'y', scales: { x: { beginAtZero: true, max: 105, ticks: { callback: (v) => v+'%' }, grid: { color: '#F0F0F0' } }, y: { ticks: { font: { size: 10 } }, grid: { display: false } } } },
     plugins: [ChartDataLabels]
   });
 
@@ -1286,7 +1375,7 @@ function renderParameter() {
     type: 'bar',
     data: {
       labels: params.map(p => shortLabel(p[0], 15)),
-      datasets: [{ label: 'Avg Error %', data: params.map(p => p[1].err/p[1].count), backgroundColor: params.map(p => { const v = p[1].err/p[1].count; return v === 0 ? COLORS.green : v < 0.1 ? COLORS.yellow : COLORS.red; }), borderRadius: 6 }]
+      datasets: [{ label: 'Error %', data: params.map(p => calcError(p[1].pass,p[1].fail)*100), backgroundColor: params.map(p => { const v = calcError(p[1].pass,p[1].fail)*100; return v === 0 ? COLORS.green : v < 10 ? COLORS.yellow : COLORS.red; }), borderRadius: 6 }]
     },
     options: chartOptions('', true, false),
     plugins: [ChartDataLabels]
@@ -1304,8 +1393,13 @@ function renderParameter() {
     plugins: [ChartDataLabels]
   });
 
-  renderTable('parameterTable', ['Parameter','Accuracy','Error %','Population','Audited','Pass','Fail','NA'],
-    params.map(p => [p[0], scoreBadge(p[1].sum/p[1].count), scoreBadge(1-p[1].err/p[1].count), p[1].pop, p[1].opp, p[1].pass, p[1].fail, p[1].na]));
+  renderTable('parameterTable', ['Parameter','Accuracy %','Error %','Sample %','Population','Audited','Pass','Fail','NA'],
+    params.map(p => {
+      const acc = calcAccuracy(p[1].pass,p[1].fail)*100;
+      const err = calcError(p[1].pass,p[1].fail)*100;
+      const smp = calcSampleRate(p[1].opp,p[1].pop)*100;
+      return [p[0], scoreBadge(acc), scoreBadge(err>0?(100-err):100), smp.toFixed(1)+'%', p[1].pop, p[1].opp, p[1].pass, p[1].fail, p[1].na];
+    }));
 }
 
 // ============ TABLE RENDER ============
@@ -1405,8 +1499,11 @@ function updateSheetDropdowns() {
   const names = uploadedWorkbook.SheetNames;
   
   // Auto-detect sheets by name patterns
-  let auditIdx = names.findIndex(n => /audit/i.test(n));
-  let recIdx = names.findIndex(n => /recruiter|performance/i.test(n));
+  // User-specified sheet names: "Audit Count" and "Recruiter Wise Data"
+  let auditIdx = names.findIndex(n => /audit\s*count/i.test(n));
+  if (auditIdx < 0) auditIdx = names.findIndex(n => /audit/i.test(n));
+  let recIdx = names.findIndex(n => /recruiter\s*wise/i.test(n));
+  if (recIdx < 0) recIdx = names.findIndex(n => /recruiter|performance/i.test(n));
   // Fallback: first sheet = audit, second = recruiter
   if (auditIdx < 0) auditIdx = 0;
   if (recIdx < 0) recIdx = names.length > 1 ? 1 : 0;
@@ -1472,7 +1569,14 @@ function applyUpload() {
       r['Parameter'] = (r['Parameter '] || r['Parameter'] || '').toString().trim();
       r['Week'] = (r['Week']||'').toString().trim();
       r['Financial Year'] = r['Financial Year'] || r['Finanical Year'] || r['Year'] || '';
-      r['Audit Score'] = parseFloat(r['Audit Score']) || 0;
+      // Audit Score: 1=Pass, 0=Fail, empty/NA=NA
+      const rawScore = r['Audit Score'];
+      if (rawScore === '' || rawScore === null || rawScore === undefined || rawScore === 'NA' || rawScore === '-') {
+        r['Audit Score'] = 'NA';
+      } else {
+        r['Audit Score'] = parseFloat(rawScore);
+        if (isNaN(r['Audit Score'])) r['Audit Score'] = 'NA';
+      }
       r['Program Manager'] = (r['Program Manager']||'').toString().trim();
     });
     recruiterData = recCleaned;
