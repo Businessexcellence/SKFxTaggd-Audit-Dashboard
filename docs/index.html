@@ -563,16 +563,17 @@ function loadData() {
 
 // ============ MULTI-SELECT FILTERS ============
 function initFilters() {
-  const years = [...new Set(auditData.map(r => r['Finanical Year']))].sort();
+  // Convert years to strings consistently to avoid number/string mismatch
+  const years = [...new Set(auditData.map(r => String(r['Finanical Year'])))].sort();
   const months = [...new Set(auditData.map(r => r['Month']))].sort((a,b) => (MONTH_SORT[a]||99) - (MONTH_SORT[b]||99));
   const weeks = [...new Set(auditData.map(r => r['Week']))].sort();
   const stages = [...new Set(auditData.map(r => r['Recruitment Stage']))];
   const params = [...new Set(auditData.map(r => r['Parameter']))];
-  const recruiters = [...new Set(recruiterData.map(r => r['Recruiter Name']))].sort();
+  const recruiters = [...new Set(recruiterData.map(r => r['Recruiter Name']))].filter(Boolean).sort();
 
   activeFilters = { year: [...years], month: [...months], week: [...weeks], stage: [...stages], parameter: [...params], recruiter: [...recruiters] };
 
-  createMultiSelect('filterYear', 'Financial Year', years.map(String), 'year');
+  createMultiSelect('filterYear', 'Financial Year', years, 'year');
   createMultiSelect('filterMonth', 'Month', months, 'month');
   createMultiSelect('filterWeek', 'Week', weeks, 'week');
   createMultiSelect('filterStage', 'Recruitment Stage', stages, 'stage');
@@ -665,8 +666,12 @@ document.addEventListener('click', () => {
 });
 
 function resetFilters() {
+  // Rebuild filters and all dropdown checkboxes from scratch
   initFilters();
   applyFilters();
+  // Close any open dropdowns
+  document.querySelectorAll('.multi-select-dropdown.show').forEach(d => d.classList.remove('show'));
+  document.querySelectorAll('.multi-select-btn.active').forEach(b => b.classList.remove('active'));
 }
 
 // ============ APPLY FILTERS ============
@@ -736,22 +741,22 @@ function generateAIInsights(view) {
 
   // Overall accuracy insight using correct thresholds
   if (accPct >= 95) {
-    insights.push({ type: 'success', text: '<strong>Excellent Performance!</strong> Overall accuracy is <strong>' + accPct.toFixed(1) + '%</strong> (Pass/(Pass+Fail)), well above the 95% benchmark.' });
+    insights.push({ type: 'success', text: '<strong>Excellent Performance!</strong> Overall accuracy is <strong>' + Math.round(accPct) + '%</strong> (Pass/(Pass+Fail)), well above the 95% benchmark.' });
   } else if (accPct >= 85) {
-    insights.push({ type: 'warning', text: '<strong>Good Performance.</strong> Overall accuracy at <strong>' + accPct.toFixed(1) + '%</strong>. Some parameters need attention to reach the 95% Excellent target.' });
+    insights.push({ type: 'warning', text: '<strong>Good Performance.</strong> Overall accuracy at <strong>' + Math.round(accPct) + '%</strong>. Some parameters need attention to reach the 95% Excellent target.' });
   } else {
-    insights.push({ type: 'danger', text: '<strong>Needs Attention.</strong> Overall accuracy at <strong>' + accPct.toFixed(1) + '%</strong> is below 85%. Immediate corrective action recommended.' });
+    insights.push({ type: 'danger', text: '<strong>Needs Attention.</strong> Overall accuracy at <strong>' + Math.round(accPct) + '%</strong> is below 85%. Immediate corrective action recommended.' });
   }
 
   // Failure insight
   if (totalFail > 0) {
-    insights.push({ type: 'danger', text: '<strong>Failure Alert:</strong> ' + totalFail + ' failed out of ' + (totalPass+totalFail) + ' evaluated (Error Rate: ' + errPct.toFixed(1) + '%). Investigate root causes in affected parameters.' });
+    insights.push({ type: 'danger', text: '<strong>Failure Alert:</strong> ' + totalFail + ' failed out of ' + (totalPass+totalFail) + ' evaluated (Error Rate: ' + Math.round(errPct) + '%). Investigate root causes in affected parameters.' });
   } else {
     insights.push({ type: 'success', text: '<strong>Zero Failures!</strong> All ' + totalPass + ' evaluated opportunities passed. Outstanding compliance across all parameters.' });
   }
 
   // Sample rate insight
-  insights.push({ type: smpPct >= 40 ? 'success' : 'warning', text: '<strong>Sample Rate:</strong> ' + smpPct.toFixed(1) + '% (' + totalOpp + ' of ' + totalPop + ' population sampled).' + (smpPct < 40 ? ' Consider increasing sample size for better coverage.' : ' Adequate coverage achieved.') });
+  insights.push({ type: smpPct >= 40 ? 'success' : 'warning', text: '<strong>Sample Rate:</strong> ' + Math.round(smpPct) + '% (' + totalOpp + ' of ' + totalPop + ' population sampled).' + (smpPct < 40 ? ' Consider increasing sample size for better coverage.' : ' Adequate coverage achieved.') });
 
   // Stage analysis using correct formula
   const stageData = {};
@@ -766,7 +771,7 @@ function generateAIInsights(view) {
     if (acc < weakestScore) { weakestScore = acc; weakestStage = stage; }
   });
   if (weakestStage && weakestScore < 95) {
-    insights.push({ type: weakestScore < 85 ? 'danger' : 'warning', text: '<strong>Focus Area:</strong> "' + weakestStage + '" stage has the lowest accuracy at <strong>' + weakestScore.toFixed(1) + '%</strong> (' + perfLabel(weakestScore) + '). Recommend targeted training.' });
+    insights.push({ type: weakestScore < 85 ? 'danger' : 'warning', text: '<strong>Focus Area:</strong> "' + weakestStage + '" stage has the lowest accuracy at <strong>' + Math.round(weakestScore) + '%</strong> (' + perfLabel(weakestScore) + '). Recommend targeted training.' });
   }
 
   // Recruiter insight (Audit Score: 1=Pass, 0=Fail, 'NA'/empty=NA excluded from accuracy)
@@ -790,8 +795,8 @@ function generateAIInsights(view) {
       if (acc >= topScore) { topScore = acc; topRec = name; }
       if (acc <= lowScore) { lowScore = acc; lowRec = name; }
     });
-    if (topRec) insights.push({ type: 'success', text: '<strong>Top Performer:</strong> <strong>' + topRec + '</strong> leads with accuracy of <strong>' + topScore.toFixed(1) + '%</strong> (' + perfLabel(topScore) + ').' });
-    if (lowRec && lowScore < 85 && lowRec !== topRec) insights.push({ type: 'danger', text: '<strong>Coaching Needed:</strong> <strong>' + lowRec + '</strong> has the lowest accuracy at <strong>' + lowScore.toFixed(1) + '%</strong> (Needs Attention). Consider a 1-on-1 improvement plan.' });
+    if (topRec) insights.push({ type: 'success', text: '<strong>Top Performer:</strong> <strong>' + topRec + '</strong> leads with accuracy of <strong>' + Math.round(topScore) + '%</strong> (' + perfLabel(topScore) + ').' });
+    if (lowRec && lowScore < 85 && lowRec !== topRec) insights.push({ type: 'danger', text: '<strong>Coaching Needed:</strong> <strong>' + lowRec + '</strong> has the lowest accuracy at <strong>' + Math.round(lowScore) + '%</strong> (Needs Attention). Consider a 1-on-1 improvement plan.' });
   }
 
   // Monthly trend insight using correct formula
@@ -808,11 +813,11 @@ function generateAIInsights(view) {
     const prev = monthEntries[monthEntries.length-2];
     const lastAcc = calcAccuracy(last[1].pass, last[1].fail) * 100;
     const prevAcc = calcAccuracy(prev[1].pass, prev[1].fail) * 100;
-    const change = (lastAcc - prevAcc).toFixed(1);
-    if (parseFloat(change) > 0) {
-      insights.push({ type: 'success', text: '<strong>Positive Trend:</strong> Accuracy improved by <strong>+' + change + '%</strong> from ' + prev[0] + ' (' + prevAcc.toFixed(1) + '%) to ' + last[0] + ' (' + lastAcc.toFixed(1) + '%).' });
-    } else if (parseFloat(change) < 0) {
-      insights.push({ type: 'danger', text: '<strong>Declining Trend:</strong> Accuracy dropped by <strong>' + change + '%</strong> from ' + prev[0] + ' (' + prevAcc.toFixed(1) + '%) to ' + last[0] + ' (' + lastAcc.toFixed(1) + '%). Root cause analysis recommended.' });
+    const change = Math.round(lastAcc - prevAcc);
+    if (change > 0) {
+      insights.push({ type: 'success', text: '<strong>Positive Trend:</strong> Accuracy improved by <strong>+' + change + '%</strong> from ' + prev[0] + ' (' + Math.round(prevAcc) + '%) to ' + last[0] + ' (' + Math.round(lastAcc) + '%).' });
+    } else if (change < 0) {
+      insights.push({ type: 'danger', text: '<strong>Declining Trend:</strong> Accuracy dropped by <strong>' + change + '%</strong> from ' + prev[0] + ' (' + Math.round(prevAcc) + '%) to ' + last[0] + ' (' + Math.round(lastAcc) + '%). Root cause analysis recommended.' });
     }
   }
 
@@ -856,8 +861,8 @@ function perfLabel(accPct) {
 // ============ CHART HELPERS ============
 function destroyChart(id) { if(charts[id]) { charts[id].destroy(); delete charts[id]; } }
 
-function pct(v) { return (v * 100).toFixed(1) + '%'; }
-function pctVal(v) { return (v * 100).toFixed(1); }
+function pct(v) { return Math.round(v * 100) + '%'; }
+function pctVal(v) { return Math.round(v * 100); }
 
 const DATALABEL_DEFAULTS = {
   display: true,
@@ -865,7 +870,13 @@ const DATALABEL_DEFAULTS = {
   color: '#333',
   anchor: 'end',
   align: 'top',
-  formatter: (v) => typeof v === 'number' ? (v > 1 ? v : (v*100).toFixed(1)+'%') : v
+  formatter: (v) => typeof v === 'number' ? Math.round(v) + '%' : v
+};
+
+// For charts showing raw counts (population, audited, etc.) - no % suffix
+const DATALABEL_COUNT = {
+  ...DATALABEL_DEFAULTS,
+  formatter: (v) => typeof v === 'number' ? v.toLocaleString() : v
 };
 
 const DATALABEL_INSIDE = {
@@ -883,10 +894,13 @@ function chartOptions(title, yPct, showLegend) {
     plugins: {
       legend: { display: showLegend !== false, position: 'top', labels: { font: { size: 11, weight: '500' }, padding: 12, usePointStyle: true } },
       datalabels: DATALABEL_DEFAULTS,
-      tooltip: { backgroundColor: '#172B4D', titleFont: { size: 12, weight: '600' }, bodyFont: { size: 11 }, padding: 10, cornerRadius: 8 }
+      tooltip: {
+        backgroundColor: '#172B4D', titleFont: { size: 12, weight: '600' }, bodyFont: { size: 11 }, padding: 10, cornerRadius: 8,
+        callbacks: { label: yPct ? (ctx) => ctx.dataset.label + ': ' + Math.round(ctx.parsed.y) + '%' : undefined }
+      }
     },
     scales: {
-      y: { beginAtZero: true, max: yPct ? 105 : undefined, ticks: { callback: yPct ? (v) => v+'%' : undefined, font: { size: 11 } }, grid: { color: '#F0F0F0' } },
+      y: { beginAtZero: true, min: 0, max: yPct ? 100 : undefined, ticks: { stepSize: yPct ? 20 : undefined, callback: yPct ? (v) => v+'%' : undefined, font: { size: 11 } }, grid: { color: '#F0F0F0' } },
       x: { ticks: { font: { size: 10 }, maxRotation: 45 }, grid: { display: false } }
     }
   };
@@ -900,10 +914,10 @@ function shortLabel(s, max) {
 function scoreBadge(v) {
   const n = parseFloat(v);
   if (isNaN(n) || v === '-' || v === '' || v === 'N/A') return '<span class="score-badge score-mid">N/A</span>';
-  // v is already a percentage number (0-100)
-  if (n >= 95) return '<span class="score-badge score-high">' + n.toFixed(1) + '%</span>';
-  if (n >= 85) return '<span class="score-badge score-mid">' + n.toFixed(1) + '%</span>';
-  return '<span class="score-badge score-low">' + n.toFixed(1) + '%</span>';
+  // v is already a percentage number (0-100), round to whole number
+  if (n >= 95) return '<span class="score-badge score-high">' + Math.round(n) + '%</span>';
+  if (n >= 85) return '<span class="score-badge score-mid">' + Math.round(n) + '%</span>';
+  return '<span class="score-badge score-low">' + Math.round(n) + '%</span>';
 }
 
 // ============ RENDER: OVERALL ============
@@ -921,12 +935,12 @@ function renderOverall() {
   const samplePct = calcSampleRate(totalOpp, totalPop) * 100;
 
   document.getElementById('overallKpis').innerHTML = [
-    kpiCard('Overall Accuracy', accPct.toFixed(1) + '%', 'Target: 95% | ' + perfLabel(accPct), perfTrend(accPct), perfLabel(accPct)),
+    kpiCard('Overall Accuracy', accPct.toFixed(0) + '%', 'Target: 95% | ' + perfLabel(accPct), perfTrend(accPct), perfLabel(accPct)),
     kpiCard('Total Population', totalPop, 'Across all stages', null, null),
-    kpiCard('Sample Rate', samplePct.toFixed(1) + '%', totalOpp + ' of ' + totalPop + ' sampled', null, null),
+    kpiCard('Sample Rate', samplePct.toFixed(0) + '%', totalOpp + ' of ' + totalPop + ' sampled', null, null),
     kpiCard('Pass', totalPass, 'Out of ' + (totalPass+totalFail) + ' evaluated', null, null),
     kpiCard('Failures', totalFail, totalFail === 0 ? 'Zero defects!' : 'Needs attention', totalFail === 0 ? 'up' : 'down', totalFail === 0 ? 'Clean' : totalFail + ' issues'),
-    kpiCard('Error Rate', errPct.toFixed(1) + '%', errPct === 0 ? 'No errors detected' : 'Investigate causes', errPct === 0 ? 'up' : 'down', errPct === 0 ? 'Perfect' : 'Alert')
+    kpiCard('Error Rate', errPct.toFixed(0) + '%', errPct === 0 ? 'No errors detected' : 'Investigate causes', errPct === 0 ? 'up' : 'down', errPct === 0 ? 'Perfect' : 'Alert')
   ].join('');
 
   // Trend chart - accuracy over months using correct formula
@@ -961,7 +975,7 @@ function renderOverall() {
         borderWidth: 3
       }]
     },
-    options: {...chartOptions('', true, false), scales: {...chartOptions('',true,false).scales, y: {beginAtZero:true, max:105, ticks:{callback:(v)=>v+'%',font:{size:11}}, grid:{color:'#F0F0F0'}}}},
+    options: chartOptions('', true, false),
     plugins: [ChartDataLabels]
   });
 
@@ -977,7 +991,7 @@ function renderOverall() {
       responsive: true, maintainAspectRatio: false,
       plugins: {
         legend: { position: 'bottom', labels: { font: { size: 12, weight: '600' }, padding: 16, usePointStyle: true } },
-        datalabels: { color: '#fff', font: { weight: '700', size: 13 }, formatter: (v, ctx) => { const sum = ctx.dataset.data.reduce((a,b)=>a+b,0); return v > 0 ? v + ' (' + (v/sum*100).toFixed(1) + '%)' : ''; } }
+        datalabels: { color: '#fff', font: { weight: '700', size: 13 }, formatter: (v, ctx) => { const sum = ctx.dataset.data.reduce((a,b)=>a+b,0); return v > 0 ? v + ' (' + Math.round(v/sum*100) + '%)' : ''; } }
       }
     },
     plugins: [ChartDataLabels]
@@ -1034,7 +1048,7 @@ function renderOverall() {
       const acc = calcAccuracy(r['Opportunity Pass'], r['Opportunity Fail']) * 100;
       const err = calcError(r['Opportunity Pass'], r['Opportunity Fail']) * 100;
       const smp = calcSampleRate(r['Opportunity Count'], r['Total Population']) * 100;
-      return [r['Month'], r['Finanical Year'], r['Recruitment Stage'], shortLabel(r['Parameter'],35), r['Total Population'], r['Opportunity Count'], r['Opportunity Pass'], r['Opportunity Fail'], r['Opportunity NA'], scoreBadge(acc), scoreBadge(err > 0 ? (100-err) : 100), smp.toFixed(1)+'%'];
+      return [r['Month'], r['Finanical Year'], r['Recruitment Stage'], shortLabel(r['Parameter'],35), r['Total Population'], r['Opportunity Count'], r['Opportunity Pass'], r['Opportunity Fail'], r['Opportunity NA'], scoreBadge(acc), scoreBadge(err > 0 ? (100-err) : 100), smp.toFixed(0)+'%'];
     }));
 }
 
@@ -1070,8 +1084,8 @@ function renderMonthly() {
 
   document.getElementById('monthlyKpis').innerHTML = [
     kpiCard('Months Analyzed', months.length, 'Across selected filters', null, null),
-    kpiCard('Best Month', bestMonth[0], (calcAccuracy(bestMonth[1].pass,bestMonth[1].fail)*100).toFixed(1) + '% accuracy', 'up', 'Top'),
-    kpiCard('Avg Monthly Accuracy', overallAcc.toFixed(1) + '%', perfLabel(overallAcc), perfTrend(overallAcc), perfLabel(overallAcc)),
+    kpiCard('Best Month', bestMonth[0], Math.round(calcAccuracy(bestMonth[1].pass,bestMonth[1].fail)*100) + '% accuracy', 'up', 'Top'),
+    kpiCard('Avg Monthly Accuracy', overallAcc.toFixed(0) + '%', perfLabel(overallAcc), perfTrend(overallAcc), perfLabel(overallAcc)),
     kpiCard('Total Audited', totalOpp, 'Across all months', null, null)
   ].join('');
 
@@ -1101,7 +1115,7 @@ function renderMonthly() {
         { label: 'Audited', data: months.map(m => m[1].opp), backgroundColor: COLORS.blue, borderRadius: 6 }
       ]
     },
-    options: { ...chartOptions('', false, true), plugins: { ...chartOptions('', false, true).plugins, datalabels: { ...DATALABEL_DEFAULTS, formatter: (v) => v } } },
+    options: { ...chartOptions('', false, true), plugins: { ...chartOptions('', false, true).plugins, datalabels: DATALABEL_COUNT } },
     plugins: [ChartDataLabels]
   });
 
@@ -1122,7 +1136,7 @@ function renderMonthly() {
       const acc = calcAccuracy(m[1].pass,m[1].fail)*100;
       const err = calcError(m[1].pass,m[1].fail)*100;
       const smp = calcSampleRate(m[1].opp,m[1].pop)*100;
-      return [m[0], scoreBadge(acc), scoreBadge(err>0?(100-err):100), smp.toFixed(1)+'%', m[1].pop, m[1].opp, m[1].pass, m[1].fail, m[1].na];
+      return [m[0], scoreBadge(acc), scoreBadge(err>0?(100-err):100), smp.toFixed(0)+'%', m[1].pop, m[1].opp, m[1].pass, m[1].fail, m[1].na];
     }));
 }
 
@@ -1143,7 +1157,7 @@ function renderYearly() {
 
   document.getElementById('yearlyKpis').innerHTML = [
     kpiCard('Years Covered', years.length, years.map(y=>y[0]).join(', '), null, null),
-    ...years.map(y => { const acc = calcAccuracy(y[1].pass,y[1].fail)*100; return kpiCard('FY ' + y[0] + ' Accuracy', acc.toFixed(1)+'%', y[1].opp + ' audited | ' + perfLabel(acc), perfTrend(acc), perfLabel(acc)); })
+    ...years.map(y => { const acc = calcAccuracy(y[1].pass,y[1].fail)*100; return kpiCard('FY ' + y[0] + ' Accuracy', acc.toFixed(0)+'%', y[1].opp + ' audited | ' + perfLabel(acc), perfTrend(acc), perfLabel(acc)); })
   ].join('');
 
   // Yearly stage chart
@@ -1179,7 +1193,7 @@ function renderYearly() {
   charts.yearlyPieChart = new Chart(document.getElementById('yearlyPieChart'), {
     type: 'pie',
     data: { labels: ['Pass','Fail','NA'], datasets: [{ data: [totalPass,totalFail,totalNA], backgroundColor: [COLORS.green,COLORS.red,COLORS.yellow], borderWidth: 2, borderColor: '#fff' }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 12, weight: '600' }, padding: 16, usePointStyle: true } }, datalabels: { color: '#fff', font: { weight: '700', size: 13 }, formatter: (v, ctx) => { const sum = ctx.dataset.data.reduce((a,b)=>a+b,0); return v > 0 ? v + ' (' + (v/sum*100).toFixed(0) + '%)' : ''; } } } },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 12, weight: '600' }, padding: 16, usePointStyle: true } }, datalabels: { color: '#fff', font: { weight: '700', size: 13 }, formatter: (v, ctx) => { const sum = ctx.dataset.data.reduce((a,b)=>a+b,0); return v > 0 ? v + ' (' + Math.round(v/sum*100) + '%)' : ''; } } } },
     plugins: [ChartDataLabels]
   });
 
@@ -1194,7 +1208,7 @@ function renderYearly() {
         { label: 'Audited', data: years.map(y=>y[1].opp), backgroundColor: COLORS.blue, borderRadius: 6 }
       ]
     },
-    options: { ...chartOptions('', false, true), plugins: { ...chartOptions('', false, true).plugins, datalabels: { ...DATALABEL_DEFAULTS, formatter: (v) => v } } },
+    options: { ...chartOptions('', false, true), plugins: { ...chartOptions('', false, true).plugins, datalabels: DATALABEL_COUNT } },
     plugins: [ChartDataLabels]
   });
 
@@ -1203,7 +1217,7 @@ function renderYearly() {
       const acc = calcAccuracy(y[1].pass,y[1].fail)*100;
       const err = calcError(y[1].pass,y[1].fail)*100;
       const smp = calcSampleRate(y[1].opp,y[1].pop)*100;
-      return [y[0], scoreBadge(acc), scoreBadge(err>0?(100-err):100), smp.toFixed(1)+'%', y[1].pop, y[1].opp, y[1].pass, y[1].fail, y[1].na];
+      return [y[0], scoreBadge(acc), scoreBadge(err>0?(100-err):100), smp.toFixed(0)+'%', y[1].pop, y[1].opp, y[1].pass, y[1].fail, y[1].na];
     }));
 }
 
@@ -1238,8 +1252,8 @@ function renderRecruiter() {
 
   document.getElementById('recruiterKpis').innerHTML = [
     kpiCard('Total Recruiters', recs.length, 'Under review', null, null),
-    kpiCard('Top Performer', topRec[0], topAcc.toFixed(1) + '% accuracy | ' + perfLabel(topAcc), 'up', perfLabel(topAcc)),
-    kpiCard('Avg Accuracy', avgAcc.toFixed(1) + '%', perfLabel(avgAcc), perfTrend(avgAcc), perfLabel(avgAcc)),
+    kpiCard('Top Performer', topRec[0], Math.round(topAcc) + '% accuracy | ' + perfLabel(topAcc), 'up', perfLabel(topAcc)),
+    kpiCard('Avg Accuracy', avgAcc.toFixed(0) + '%', perfLabel(avgAcc), perfTrend(avgAcc), perfLabel(avgAcc)),
     kpiCard('Total Audits', d.length, 'Individual audit entries', null, null)
   ].join('');
 
@@ -1351,8 +1365,8 @@ function renderParameter() {
 
   document.getElementById('parameterKpis').innerHTML = [
     kpiCard('Parameters Tracked', params.length, 'Across all stages', null, null),
-    kpiCard('Best Parameter', shortLabel(best[0],20), bestAccPct.toFixed(1) + '% accuracy | ' + perfLabel(bestAccPct), 'up', 'Top'),
-    kpiCard('Avg Parameter Accuracy', avgAccPct.toFixed(1) + '%', perfLabel(avgAccPct), perfTrend(avgAccPct), perfLabel(avgAccPct)),
+    kpiCard('Best Parameter', shortLabel(best[0],20), Math.round(bestAccPct) + '% accuracy | ' + perfLabel(bestAccPct), 'up', 'Top'),
+    kpiCard('Avg Parameter Accuracy', avgAccPct.toFixed(0) + '%', perfLabel(avgAccPct), perfTrend(avgAccPct), perfLabel(avgAccPct)),
     kpiCard('Total Opportunities', params.reduce((s,p)=>s+p[1].opp,0), 'Audited across parameters', null, null)
   ].join('');
 
@@ -1389,7 +1403,7 @@ function renderParameter() {
   charts.paramPieChart = new Chart(document.getElementById('paramPieChart'), {
     type: 'doughnut',
     data: { labels: ['Pass','Fail','NA'], datasets: [{ data: [totalPass,totalFail,totalNA], backgroundColor: [COLORS.green,COLORS.red,COLORS.yellow], borderWidth: 2, borderColor: '#fff' }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 12, weight: '600' }, padding: 16, usePointStyle: true } }, datalabels: { color: '#fff', font: { weight: '700', size: 13 }, formatter: (v, ctx) => { const sum = ctx.dataset.data.reduce((a,b)=>a+b,0); return v > 0 ? v + ' (' + (v/sum*100).toFixed(0) + '%)' : ''; } } } },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 12, weight: '600' }, padding: 16, usePointStyle: true } }, datalabels: { color: '#fff', font: { weight: '700', size: 13 }, formatter: (v, ctx) => { const sum = ctx.dataset.data.reduce((a,b)=>a+b,0); return v > 0 ? v + ' (' + Math.round(v/sum*100) + '%)' : ''; } } } },
     plugins: [ChartDataLabels]
   });
 
@@ -1398,7 +1412,7 @@ function renderParameter() {
       const acc = calcAccuracy(p[1].pass,p[1].fail)*100;
       const err = calcError(p[1].pass,p[1].fail)*100;
       const smp = calcSampleRate(p[1].opp,p[1].pop)*100;
-      return [p[0], scoreBadge(acc), scoreBadge(err>0?(100-err):100), smp.toFixed(1)+'%', p[1].pop, p[1].opp, p[1].pass, p[1].fail, p[1].na];
+      return [p[0], scoreBadge(acc), scoreBadge(err>0?(100-err):100), smp.toFixed(0)+'%', p[1].pop, p[1].opp, p[1].pass, p[1].fail, p[1].na];
     }));
 }
 
