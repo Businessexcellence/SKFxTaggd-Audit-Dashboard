@@ -575,6 +575,7 @@ let isAdmin = false;
 let adminTab = 'audit'; // 'audit' or 'recruiter'
 let adminEditAccount = 'auto'; // which account's data is being edited
 let adminEditData = []; // working copy of data being edited
+let adminSaving = false; // guard flag to prevent renderAdmin from overwriting during save
 
 // Calendar month index for chronological sorting (Jan=1 ... Dec=12)
 const MONTH_NUM = { Jan:1, Feb:2, Mar:3, Apr:4, May:5, Jun:6, Jul:7, Aug:8, Sep:9, Oct:10, Nov:11, Dec:12 };
@@ -602,6 +603,7 @@ const COLORS = {
 
 // ============ SESSION & INACTIVITY ============
 const SESSION_KEY = 'skf_session';
+const DATA_EDITS_KEY = 'skf_data_edits';
 const INACTIVITY_LIMIT = 5 * 60 * 1000; // 5 minutes in ms
 let inactivityTimer = null;
 
@@ -611,7 +613,36 @@ function saveSession(account) {
 
 function clearSession() {
   sessionStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(DATA_EDITS_KEY);
   if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null; }
+}
+
+// Persist admin data edits to sessionStorage so they survive page refresh
+function saveDataEdits() {
+  try {
+    const edits = {
+      auto_audit: EMBEDDED_DATA.auto_audit,
+      auto_recruiter: EMBEDDED_DATA.auto_recruiter,
+      ind_audit: EMBEDDED_DATA.ind_audit,
+      ind_recruiter: EMBEDDED_DATA.ind_recruiter
+    };
+    sessionStorage.setItem(DATA_EDITS_KEY, JSON.stringify(edits));
+  } catch(e) {
+    console.warn('Could not save data edits to session:', e.message);
+  }
+}
+
+function restoreDataEdits() {
+  try {
+    const raw = sessionStorage.getItem(DATA_EDITS_KEY);
+    if (!raw) return false;
+    const edits = JSON.parse(raw);
+    if (edits.auto_audit) EMBEDDED_DATA.auto_audit = edits.auto_audit;
+    if (edits.auto_recruiter) EMBEDDED_DATA.auto_recruiter = edits.auto_recruiter;
+    if (edits.ind_audit) EMBEDDED_DATA.ind_audit = edits.ind_audit;
+    if (edits.ind_recruiter) EMBEDDED_DATA.ind_recruiter = edits.ind_recruiter;
+    return true;
+  } catch(e) { return false; }
 }
 
 function getSession() {
@@ -1896,6 +1927,9 @@ function adminSwitchTab(tab) {
 }
 
 function renderAdmin() {
+  // If saving, skip re-cloning — adminSave() handles adminEditData directly
+  if (adminSaving) return;
+  
   // Get the correct source data
   let sourceData;
   if (adminTab === 'audit') {
@@ -2098,8 +2132,28 @@ function adminSave() {
     }
   }
   
+  // Persist edits to sessionStorage so they survive page refresh
+  saveDataEdits();
+  
+  // Set guard so renderAdmin() won't overwrite adminEditData during loadData
+  adminSaving = true;
+  
   // Reload data for the edited account to refresh charts
   loadData(adminEditAccount);
+  
+  // Clear guard
+  adminSaving = false;
+  
+  // Show success — but DON'T re-render admin table (loadData already triggered it)
+  // Keep the current adminEditData in sync with what was just saved
+  adminEditData = JSON.parse(JSON.stringify(cleanData));
+  if (adminTab === 'recruiter') {
+    adminEditData.forEach(r => {
+      r['Month'] = (r['Month '] || r['Month'] || '').toString().trim();
+      r['Parameter'] = (r['Parameter '] || r['Parameter'] || '').toString().trim();
+    });
+  }
+  renderAdminTable();
   
   // Show success
   setTimeout(() => {
@@ -2119,6 +2173,9 @@ function adminSave() {
 document.addEventListener('DOMContentLoaded', () => {
   Chart.register(ChartDataLabels);
   Chart.defaults.plugins.datalabels = { display: false }; // Off by default, enable per chart
+  // Restore any admin data edits BEFORE restoring session
+  // so that loadData() picks up the edited EMBEDDED_DATA
+  restoreDataEdits();
   // Auto-restore session if still valid (< 5 min inactivity)
   restoreSession();
 });
