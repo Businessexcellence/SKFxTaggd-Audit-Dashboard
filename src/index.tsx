@@ -273,6 +273,41 @@ body { font-family: 'Inter', sans-serif; background: #F7F8FC; color: #172B4D; }
 .upload-status.error { background:#FBE9E7; color:#C62828; }
 
 
+/* ADMIN DATA EDITOR */
+.admin-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px; padding:16px 20px; background:#fff; border-radius:12px; border:1px solid var(--skf-border); }
+.admin-toolbar select { padding:8px 14px; border:1.5px solid var(--skf-border); border-radius:8px; font-size:0.85rem; font-weight:600; outline:none; }
+.admin-toolbar .admin-label { font-size:0.8rem; font-weight:700; color:var(--skf-gray); text-transform:uppercase; letter-spacing:0.5px; }
+.admin-tab-bar { display:flex; gap:4px; background:#F4F5F7; border-radius:10px; padding:4px; }
+.admin-tab { padding:8px 20px; border-radius:8px; font-size:0.82rem; font-weight:600; cursor:pointer; border:none; background:transparent; color:var(--skf-gray); transition:all 0.2s; }
+.admin-tab.active { background:var(--skf-blue); color:#fff; box-shadow:0 2px 6px rgba(0,84,166,0.3); }
+.admin-actions { margin-left:auto; display:flex; gap:8px; }
+.admin-actions button { padding:8px 18px; border-radius:8px; font-size:0.82rem; font-weight:600; cursor:pointer; transition:all 0.2s; display:flex; align-items:center; gap:6px; }
+.btn-add-row { background:#E8F5E9; border:1px solid #A5D6A7; color:#2E7D32; }
+.btn-add-row:hover { background:#C8E6C9; }
+.btn-save { background:var(--skf-blue); border:none; color:#fff; }
+.btn-save:hover { background:var(--skf-blue-dark); }
+.btn-save.saved { background:var(--skf-green); }
+.admin-edit-wrap { overflow-x:auto; background:#fff; border-radius:12px; border:1px solid var(--skf-border); box-shadow:0 1px 4px rgba(0,0,0,0.04); max-height:65vh; overflow-y:auto; }
+.admin-edit-table { width:100%; border-collapse:collapse; font-size:0.78rem; }
+.admin-edit-table thead { position:sticky; top:0; z-index:2; }
+.admin-edit-table th { background:var(--skf-blue); color:#fff; padding:10px 10px; text-align:left; font-weight:600; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.4px; white-space:nowrap; border-right:1px solid rgba(255,255,255,0.15); }
+.admin-edit-table td { padding:0; border-bottom:1px solid #F0F0F0; border-right:1px solid #F5F5F5; position:relative; }
+.admin-edit-table tr:hover { background:#F0F7FF; }
+.admin-edit-table tr.row-new { background:#E8F5E9; }
+.admin-edit-table tr.row-modified { background:#FFF8E1; }
+.admin-cell-input { width:100%; padding:8px 10px; border:none; background:transparent; font-size:0.78rem; font-family:inherit; outline:none; box-sizing:border-box; }
+.admin-cell-input:focus { background:#E8F0FE; box-shadow:inset 0 0 0 2px var(--skf-blue); }
+.admin-cell-input.num { text-align:right; font-variant-numeric:tabular-nums; }
+.admin-cell-select { width:100%; padding:8px 6px; border:none; background:transparent; font-size:0.78rem; font-family:inherit; outline:none; cursor:pointer; }
+.admin-cell-select:focus { background:#E8F0FE; }
+.btn-delete-row { background:none; border:none; color:#ccc; cursor:pointer; font-size:0.9rem; padding:6px 10px; transition:color 0.2s; }
+.btn-delete-row:hover { color:var(--skf-red); }
+.admin-status { padding:10px 16px; border-radius:10px; font-size:0.82rem; font-weight:600; display:none; margin-bottom:12px; }
+.admin-status.show { display:flex; align-items:center; gap:8px; }
+.admin-status.success { background:#E8F5E9; color:#2E7D32; }
+.admin-status.info { background:#E3F2FD; color:#1565C0; }
+.admin-row-count { font-size:0.78rem; color:var(--skf-gray); padding:8px 0; }
+
 /* Responsive */
 @media (max-width: 1024px) {
   .charts-grid { grid-template-columns: 1fr; }
@@ -341,6 +376,9 @@ body { font-family: 'Inter', sans-serif; background: #F7F8FC; color: #172B4D; }
     </div>
     <div class="nav-item" data-view="parameter" onclick="switchView('parameter')">
       <i class="fas fa-clipboard-check"></i> Parameter View
+    </div>
+    <div class="nav-item" data-view="admin" onclick="switchView('admin')" id="adminNavItem" style="display:none; border-top:1px solid rgba(255,255,255,0.1); margin-top:8px; padding-top:12px;">
+      <i class="fas fa-database"></i> Data Editor
     </div>
   </div>
   <div class="sidebar-footer">
@@ -535,6 +573,32 @@ body { font-family: 'Inter', sans-serif; background: #F7F8FC; color: #172B4D; }
       <div class="data-table-wrap"><table class="data-table" id="parameterTable"></table></div>
     </div>
   </div>
+
+  <!-- VIEW: ADMIN DATA EDITOR -->
+  <div class="view-section" id="view-admin">
+    <div class="content-area">
+      <div id="adminStatus" class="admin-status"></div>
+      <div class="admin-toolbar">
+        <span class="admin-label">Account:</span>
+        <select id="adminAccountSelect" onchange="adminSwitchAccount()">
+          <option value="auto">SKF Automotive</option>
+          <option value="industrial">SKF Industrial</option>
+        </select>
+        <div class="admin-tab-bar">
+          <button class="admin-tab active" data-tab="audit" onclick="adminSwitchTab('audit')"><i class="fas fa-clipboard-list"></i>&nbsp; Audit Data</button>
+          <button class="admin-tab" data-tab="recruiter" onclick="adminSwitchTab('recruiter')"><i class="fas fa-users"></i>&nbsp; Recruiter Data</button>
+        </div>
+        <div class="admin-actions">
+          <button class="btn-add-row" onclick="adminAddRow()"><i class="fas fa-plus"></i> Add Row</button>
+          <button class="btn-save" id="btnAdminSave" onclick="adminSave()"><i class="fas fa-save"></i> Save &amp; Refresh</button>
+        </div>
+      </div>
+      <div class="admin-row-count" id="adminRowCount"></div>
+      <div class="admin-edit-wrap" id="adminEditWrap">
+        <table class="admin-edit-table" id="adminEditTable"></table>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -555,6 +619,10 @@ let filteredAudit = [];
 let filteredRecruiter = [];
 let charts = {};
 let activeFilters = { year: [], month: [], week: [], stage: [], parameter: [], recruiter: [] };
+let isAdmin = false;
+let adminTab = 'audit'; // 'audit' or 'recruiter'
+let adminEditAccount = 'auto'; // which account's data is being edited
+let adminEditData = []; // working copy of data being edited
 
 // Calendar month index for chronological sorting (Jan=1 ... Dec=12)
 const MONTH_NUM = { Jan:1, Feb:2, Mar:3, Apr:4, May:5, Jun:6, Jul:7, Aug:8, Sep:9, Oct:10, Nov:11, Dec:12 };
@@ -583,13 +651,17 @@ const COLORS = {
 // ============ AUTH ============
 function doLogout() {
   currentAccount = null;
+  isAdmin = false;
   auditData = []; recruiterData = []; filteredAudit = []; filteredRecruiter = [];
+  adminEditData = [];
   Object.keys(charts).forEach(k => { charts[k].destroy(); });
   charts = {};
   document.getElementById('loginOverlay').style.display = 'flex';
   document.getElementById('mainContent').style.display = 'none';
   document.getElementById('loginPassword').value = '';
   document.getElementById('loginError').style.display = 'none';
+  const adminNav = document.getElementById('adminNavItem');
+  if (adminNav) adminNav.style.display = 'none';
 }
 
 function doLogin() {
@@ -597,23 +669,36 @@ function doLogin() {
   let account = null, label = '';
   if (pw === 'Skfauto@321') { account = 'auto'; label = 'SKF Automotive'; }
   else if (pw === 'Skfind@123') { account = 'industrial'; label = 'SKF Industrial'; }
+  else if (pw === 'Admin@2026') { account = 'admin'; label = 'Admin Mode'; }
   if (account) {
     currentAccount = account;
     document.getElementById('loginOverlay').style.display = 'none';
     document.getElementById('mainContent').style.display = 'block';
     document.getElementById('sidebarAccountLabel').textContent = label;
     document.getElementById('accountBadge').textContent = label;
-    document.getElementById('accountBadge').className = 'account-badge ' + (account === 'auto' ? 'account-auto' : 'account-industrial');
+    document.getElementById('accountBadge').className = 'account-badge ' + (account === 'auto' ? 'account-auto' : account === 'admin' ? 'account-industrial' : 'account-industrial');
     document.getElementById('lastUpdated').textContent = new Date().toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'});
-    loadData();
+    // Show admin nav item for admin users
+    const adminNav = document.getElementById('adminNavItem');
+    if (adminNav) adminNav.style.display = account === 'admin' ? '' : 'none';
+    if (account === 'admin') {
+      // Admin mode: load industrial data by default, show editor
+      isAdmin = true;
+      loadData('industrial');
+      switchView('admin');
+    } else {
+      isAdmin = false;
+      loadData();
+    }
   } else {
     document.getElementById('loginError').style.display = 'block';
   }
 }
 
 // ============ DATA LOADING ============
-function loadData() {
-  if (currentAccount === 'auto') {
+function loadData(forAccount) {
+  const acct = forAccount || currentAccount;
+  if (acct === 'auto') {
     auditData = JSON.parse(JSON.stringify(EMBEDDED_DATA.auto_audit));
     recruiterData = JSON.parse(JSON.stringify(EMBEDDED_DATA.auto_recruiter));
   } else {
@@ -794,10 +879,12 @@ function switchView(view) {
   document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
   document.getElementById('view-'+view).classList.add('active');
 
-  const titles = { overall:'Overall View', monthly:'Monthly View', yearly:'Yearly View', recruiter:'Recruiter Performance', parameter:'Parameter View' };
-  document.getElementById('pageTitle').textContent = titles[view];
+  const titles = { overall:'Overall View', monthly:'Monthly View', yearly:'Yearly View', recruiter:'Recruiter Performance', parameter:'Parameter View', admin:'Data Editor' };
+  document.getElementById('pageTitle').textContent = titles[view] || view;
 
-  // Show recruiter filter only on recruiter view
+  // Show/hide filters and recruiter filter
+  document.getElementById('filtersBar').style.display = view === 'admin' ? 'none' : '';
+  document.getElementById('aiInsights').style.display = view === 'admin' ? 'none' : '';
   document.getElementById('filterRecruiter').style.display = view === 'recruiter' ? '' : 'none';
 
   renderCurrentView();
@@ -813,6 +900,7 @@ function renderCurrentView() {
   else if (view === 'yearly') renderYearly();
   else if (view === 'recruiter') renderRecruiter();
   else if (view === 'parameter') renderParameter();
+  else if (view === 'admin') renderAdmin();
 }
 
 // ============ AI INSIGHTS ENGINE ============
@@ -1583,7 +1671,7 @@ function clearUploadFile() {
 })();
 
 function handleFileSelect(file) {
-  if (!file.name.match(/\.xlsx?\$/i)) {
+  if (!file.name.match(/\\.xlsx?\$/i)) {
     showUploadStatus('error', 'Please select a valid Excel file (.xlsx or .xls)');
     return;
   }
@@ -1620,9 +1708,9 @@ function updateSheetDropdowns() {
   
   // Auto-detect sheets by name patterns
   // User-specified sheet names: "Audit Count" and "Recruiter Wise Data"
-  let auditIdx = names.findIndex(n => /audit\s*count/i.test(n));
+  let auditIdx = names.findIndex(n => /audit\\s*count/i.test(n));
   if (auditIdx < 0) auditIdx = names.findIndex(n => /audit/i.test(n));
-  let recIdx = names.findIndex(n => /recruiter\s*wise/i.test(n));
+  let recIdx = names.findIndex(n => /recruiter\\s*wise/i.test(n));
   if (recIdx < 0) recIdx = names.findIndex(n => /recruiter|performance/i.test(n));
   // Fallback: first sheet = audit, second = recruiter
   if (auditIdx < 0) auditIdx = 0;
@@ -1720,6 +1808,272 @@ function applyUpload() {
 document.getElementById('uploadOverlay')?.addEventListener('click', function(e) {
   if (e.target === this) closeUploadModal();
 });
+
+// ============ ADMIN DATA EDITOR ============
+
+// Audit table columns
+const AUDIT_COLS = [
+  { key: 'Client', label: 'Client', type: 'text', width: '120px' },
+  { key: 'Finanical Year', label: 'Year', type: 'number', width: '70px' },
+  { key: 'Month', label: 'Month', type: 'select', options: ['Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep'], width: '80px' },
+  { key: 'MonthNumber', label: 'Month#', type: 'number', width: '55px' },
+  { key: 'Week', label: 'Week', type: 'text', width: '70px' },
+  { key: 'Recruitment Stage', label: 'Stage', type: 'select', options: ['Intake','Sourcing & Screening','Assessment & Interview','Offer/APL','Pre-Onboarding','Share Point Checklist'], width: '150px' },
+  { key: 'Parameter', label: 'Parameter', type: 'text', width: '250px' },
+  { key: 'Total Population', label: 'Population', type: 'number', width: '80px' },
+  { key: 'Opportunity Count', label: 'Opp Count', type: 'number', width: '80px' },
+  { key: 'Opportunity Pass', label: 'Pass', type: 'number', width: '65px' },
+  { key: 'Opportunity Fail', label: 'Fail', type: 'number', width: '65px' },
+  { key: 'Opportunity NA', label: 'NA', type: 'number', width: '55px' },
+  { key: 'Accuracy Score', label: 'Accuracy', type: 'number', width: '75px', step: '0.01' },
+  { key: 'Error %', label: 'Error %', type: 'number', width: '70px', step: '0.01' },
+  { key: 'Sample Count', label: 'Sample', type: 'number', width: '75px', step: '0.01' }
+];
+
+// Recruiter table columns
+const REC_COLS = [
+  { key: 'Client', label: 'Client', type: 'text', width: '120px' },
+  { key: 'Financial Year', label: 'Year', type: 'number', width: '70px' },
+  { key: 'Month', label: 'Month', type: 'select', options: ['Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep'], width: '80px' },
+  { key: 'Month Number', label: 'Month#', type: 'number', width: '55px' },
+  { key: 'Week', label: 'Week', type: 'text', width: '70px' },
+  { key: 'Recruiter Name', label: 'Recruiter', type: 'text', width: '130px' },
+  { key: 'Program Manager', label: 'PM', type: 'text', width: '130px' },
+  { key: 'Parameter', label: 'Parameter', type: 'text', width: '250px' },
+  { key: 'Audit Score', label: 'Score', type: 'text', width: '70px' }
+];
+
+function adminSwitchAccount() {
+  adminEditAccount = document.getElementById('adminAccountSelect').value;
+  renderAdmin();
+}
+
+function adminSwitchTab(tab) {
+  adminTab = tab;
+  document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector('.admin-tab[data-tab="'+tab+'"]').classList.add('active');
+  renderAdmin();
+}
+
+function renderAdmin() {
+  // Get the correct source data
+  let sourceData;
+  if (adminTab === 'audit') {
+    sourceData = adminEditAccount === 'auto' ? EMBEDDED_DATA.auto_audit : EMBEDDED_DATA.ind_audit;
+  } else {
+    sourceData = adminEditAccount === 'auto' ? EMBEDDED_DATA.auto_recruiter : EMBEDDED_DATA.ind_recruiter;
+  }
+  
+  // Deep clone for editing
+  adminEditData = JSON.parse(JSON.stringify(sourceData));
+  
+  // Clean recruiter data field names for consistency
+  if (adminTab === 'recruiter') {
+    adminEditData.forEach(r => {
+      if (r['Month '] !== undefined && r['Month'] === undefined) { r['Month'] = r['Month ']; delete r['Month ']; }
+      if (r['Parameter '] !== undefined && r['Parameter'] === undefined) { r['Parameter'] = r['Parameter ']; delete r['Parameter ']; }
+      if (r['Month Number'] === undefined && r['Month '] !== undefined) { /* already handled */ }
+      // Normalize Month field
+      r['Month'] = (r['Month '] || r['Month'] || '').toString().trim();
+    });
+  }
+  
+  // Set account selector
+  document.getElementById('adminAccountSelect').value = adminEditAccount;
+  
+  // Render table
+  renderAdminTable();
+}
+
+function renderAdminTable() {
+  const cols = adminTab === 'audit' ? AUDIT_COLS : REC_COLS;
+  const table = document.getElementById('adminEditTable');
+  
+  let html = '<thead><tr>';
+  html += '<th style="width:40px;text-align:center;">#</th>';
+  cols.forEach(col => {
+    html += '<th style="min-width:'+col.width+'">' + col.label + '</th>';
+  });
+  html += '<th style="width:40px;"></th>'; // delete col
+  html += '</tr></thead><tbody>';
+  
+  adminEditData.forEach((row, idx) => {
+    html += '<tr data-idx="'+idx+'">';
+    html += '<td style="text-align:center;font-size:0.7rem;color:#999;padding:0 6px;">'+(idx+1)+'</td>';
+    cols.forEach(col => {
+      const val = row[col.key] !== undefined ? row[col.key] : '';
+      if (col.type === 'select') {
+        html += '<td><select class="admin-cell-select" data-key="'+col.key+'" data-idx="'+idx+'" onchange="adminCellChange(this)">';
+        const opts = col.options || [];
+        opts.forEach(o => {
+          html += '<option value="'+o+'" '+(String(val).trim()===o?'selected':'')+'>'+o+'</option>';
+        });
+        html += '</select></td>';
+      } else if (col.type === 'number') {
+        html += '<td><input class="admin-cell-input num" type="number" step="'+(col.step||'1')+'" value="'+val+'" data-key="'+col.key+'" data-idx="'+idx+'" onchange="adminCellChange(this)" onfocus="this.select()"></td>';
+      } else {
+        html += '<td><input class="admin-cell-input" type="text" value="'+escHtml(String(val))+'" data-key="'+col.key+'" data-idx="'+idx+'" onchange="adminCellChange(this)" onfocus="this.select()"></td>';
+      }
+    });
+    html += '<td><button class="btn-delete-row" onclick="adminDeleteRow('+idx+')" title="Delete row"><i class="fas fa-trash-alt"></i></button></td>';
+    html += '</tr>';
+  });
+  
+  html += '</tbody>';
+  table.innerHTML = html;
+  
+  document.getElementById('adminRowCount').textContent = adminEditData.length + ' rows | ' + (adminTab === 'audit' ? 'Audit Count' : 'Recruiter Performance') + ' | ' + (adminEditAccount === 'auto' ? 'SKF Automotive' : 'SKF Industrial');
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function adminCellChange(el) {
+  const idx = parseInt(el.dataset.idx);
+  const key = el.dataset.key;
+  let val = el.value;
+  
+  // For number fields, parse
+  if (el.type === 'number') {
+    val = val === '' ? 0 : parseFloat(val);
+    if (isNaN(val)) val = 0;
+  }
+  
+  adminEditData[idx][key] = val;
+  
+  // Mark row as modified visually
+  const tr = el.closest('tr');
+  if (tr && !tr.classList.contains('row-new')) tr.classList.add('row-modified');
+  
+  // Auto-calculate Accuracy and Error for audit rows
+  if (adminTab === 'audit' && (key === 'Opportunity Pass' || key === 'Opportunity Fail')) {
+    const pass = parseFloat(adminEditData[idx]['Opportunity Pass']) || 0;
+    const fail = parseFloat(adminEditData[idx]['Opportunity Fail']) || 0;
+    const denom = pass + fail;
+    adminEditData[idx]['Accuracy Score'] = denom > 0 ? +(pass / denom).toFixed(4) : 0;
+    adminEditData[idx]['Error %'] = denom > 0 ? +(fail / denom).toFixed(4) : 0;
+    // Update the displayed values
+    const accInput = tr.querySelector('input[data-key="Accuracy Score"]');
+    const errInput = tr.querySelector('input[data-key="Error %"]');
+    if (accInput) accInput.value = adminEditData[idx]['Accuracy Score'];
+    if (errInput) errInput.value = adminEditData[idx]['Error %'];
+  }
+  
+  // Auto-calculate Sample Count when Population or Opp Count changes
+  if (adminTab === 'audit' && (key === 'Total Population' || key === 'Opportunity Count')) {
+    const pop = parseFloat(adminEditData[idx]['Total Population']) || 0;
+    const opp = parseFloat(adminEditData[idx]['Opportunity Count']) || 0;
+    adminEditData[idx]['Sample Count'] = pop > 0 ? +(opp / pop).toFixed(4) : 0;
+    const smpInput = tr.querySelector('input[data-key="Sample Count"]');
+    if (smpInput) smpInput.value = adminEditData[idx]['Sample Count'];
+  }
+}
+
+function adminAddRow() {
+  const cols = adminTab === 'audit' ? AUDIT_COLS : REC_COLS;
+  const newRow = {};
+  
+  // Pre-fill with defaults from the last row
+  const lastRow = adminEditData.length > 0 ? adminEditData[adminEditData.length - 1] : null;
+  cols.forEach(col => {
+    if (lastRow && (col.key === 'Client' || col.key === 'Finanical Year' || col.key === 'Financial Year' || col.key === 'Month' || col.key === 'MonthNumber' || col.key === 'Month Number' || col.key === 'Week' || col.key === 'Program Manager')) {
+      newRow[col.key] = lastRow[col.key] || '';
+    } else if (col.type === 'number') {
+      newRow[col.key] = 0;
+    } else {
+      newRow[col.key] = '';
+    }
+  });
+  
+  adminEditData.push(newRow);
+  renderAdminTable();
+  
+  // Scroll to bottom and mark new row
+  const wrap = document.getElementById('adminEditWrap');
+  wrap.scrollTop = wrap.scrollHeight;
+  const rows = document.querySelectorAll('#adminEditTable tbody tr');
+  if (rows.length > 0) rows[rows.length - 1].classList.add('row-new');
+  
+  showAdminStatus('info', 'New row added at bottom. Fill in the data and click Save & Refresh.');
+}
+
+function adminDeleteRow(idx) {
+  if (!confirm('Delete row ' + (idx+1) + '? This cannot be undone until you reload.')) return;
+  adminEditData.splice(idx, 1);
+  renderAdminTable();
+  showAdminStatus('info', 'Row deleted. Click Save & Refresh to apply changes.');
+}
+
+function showAdminStatus(type, msg) {
+  const el = document.getElementById('adminStatus');
+  el.className = 'admin-status show ' + type;
+  el.innerHTML = '<i class="fas ' + (type === 'success' ? 'fa-check-circle' : 'fa-info-circle') + '"></i> ' + msg;
+  if (type === 'success') setTimeout(() => el.classList.remove('show'), 4000);
+}
+
+function adminSave() {
+  const btn = document.getElementById('btnAdminSave');
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+  btn.disabled = true;
+  
+  // Prepare clean data copy for saving back
+  const cleanData = JSON.parse(JSON.stringify(adminEditData));
+  
+  if (adminTab === 'audit') {
+    // Clean audit data types
+    cleanData.forEach(r => {
+      r['Total Population'] = parseInt(r['Total Population']) || 0;
+      r['Opportunity Count'] = parseInt(r['Opportunity Count']) || 0;
+      r['Opportunity Pass'] = parseInt(r['Opportunity Pass']) || 0;
+      r['Opportunity Fail'] = parseInt(r['Opportunity Fail']) || 0;
+      r['Opportunity NA'] = parseInt(r['Opportunity NA']) || 0;
+      r['Accuracy Score'] = parseFloat(r['Accuracy Score']) || 0;
+      r['Error %'] = parseFloat(r['Error %']) || 0;
+      r['Sample Count'] = parseFloat(r['Sample Count']) || 0;
+    });
+    // Save back to EMBEDDED_DATA
+    if (adminEditAccount === 'auto') {
+      EMBEDDED_DATA.auto_audit = cleanData;
+    } else {
+      EMBEDDED_DATA.ind_audit = cleanData;
+    }
+  } else {
+    // Recruiter data: restore 'Month ' (with trailing space) for compatibility
+    cleanData.forEach(r => {
+      r['Month '] = r['Month'] || '';
+      r['Parameter '] = r['Parameter'] || '';
+      const rawScore = r['Audit Score'];
+      if (rawScore === '' || rawScore === 'NA' || rawScore === null || rawScore === undefined || rawScore === '-') {
+        r['Audit Score'] = 'NA';
+      } else {
+        const n = parseFloat(rawScore);
+        r['Audit Score'] = isNaN(n) ? 'NA' : n;
+      }
+    });
+    if (adminEditAccount === 'auto') {
+      EMBEDDED_DATA.auto_recruiter = cleanData;
+    } else {
+      EMBEDDED_DATA.ind_recruiter = cleanData;
+    }
+  }
+  
+  // Reload data for the edited account to refresh charts
+  loadData(adminEditAccount);
+  
+  // Show success
+  setTimeout(() => {
+    btn.innerHTML = '<i class="fas fa-check"></i> Saved!';
+    btn.classList.add('saved');
+    btn.disabled = false;
+    showAdminStatus('success', 'Data saved! All charts and tables have been refreshed with ' + cleanData.length + ' rows. Switch to other views to see the updates.');
+    
+    setTimeout(() => {
+      btn.innerHTML = '<i class="fas fa-save"></i> Save &amp; Refresh';
+      btn.classList.remove('saved');
+    }, 2000);
+  }, 500);
+}
 
 // ============ INIT ============
 document.addEventListener('DOMContentLoaded', () => {
