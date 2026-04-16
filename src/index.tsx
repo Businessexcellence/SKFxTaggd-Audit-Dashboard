@@ -648,6 +648,91 @@ const COLORS = {
   palette: ['#0054A6','#007C92','#00875A','#FF991F','#DE350B','#6554C0','#0073B1','#36B37E','#FF5630','#5243AA','#00A3BF','#ABB3BB']
 };
 
+// ============ SESSION & INACTIVITY ============
+const SESSION_KEY = 'skf_session';
+const INACTIVITY_LIMIT = 5 * 60 * 1000; // 5 minutes in ms
+let inactivityTimer = null;
+
+function saveSession(account) {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify({ account: account, lastActive: Date.now() }));
+}
+
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
+  if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null; }
+}
+
+function getSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const sess = JSON.parse(raw);
+    if (Date.now() - sess.lastActive > INACTIVITY_LIMIT) {
+      clearSession();
+      return null;
+    }
+    return sess;
+  } catch(e) { return null; }
+}
+
+function resetInactivityTimer() {
+  // Update last active timestamp
+  const sess = getSession();
+  if (sess) {
+    sess.lastActive = Date.now();
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+  }
+  // Reset the countdown
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  if (currentAccount) {
+    inactivityTimer = setTimeout(() => {
+      doLogout();
+    }, INACTIVITY_LIMIT);
+  }
+}
+
+function startInactivityTracking() {
+  ['mousemove','mousedown','keydown','scroll','touchstart','click'].forEach(evt => {
+    document.addEventListener(evt, resetInactivityTimer, { passive: true });
+  });
+  resetInactivityTimer();
+}
+
+function restoreSession() {
+  const sess = getSession();
+  if (!sess) return false;
+  // Map account back to the login flow
+  const accountMap = {
+    'auto': { label: 'SKF Automotive', badgeClass: 'account-auto' },
+    'industrial': { label: 'SKF Industrial', badgeClass: 'account-industrial' },
+    'admin': { label: 'Admin Mode', badgeClass: 'account-industrial' }
+  };
+  const info = accountMap[sess.account];
+  if (!info) return false;
+
+  currentAccount = sess.account;
+  document.getElementById('loginOverlay').style.display = 'none';
+  document.getElementById('mainContent').style.display = 'block';
+  document.getElementById('sidebarAccountLabel').textContent = info.label;
+  document.getElementById('accountBadge').textContent = info.label;
+  document.getElementById('accountBadge').className = 'account-badge ' + info.badgeClass;
+  document.getElementById('lastUpdated').textContent = new Date().toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'});
+
+  const adminNav = document.getElementById('adminNavItem');
+  if (adminNav) adminNav.style.display = sess.account === 'admin' ? '' : 'none';
+
+  if (sess.account === 'admin') {
+    isAdmin = true;
+    loadData('industrial');
+    switchView('admin');
+  } else {
+    isAdmin = false;
+    loadData();
+  }
+  startInactivityTracking();
+  return true;
+}
+
 // ============ AUTH ============
 function doLogout() {
   currentAccount = null;
@@ -656,6 +741,7 @@ function doLogout() {
   adminEditData = [];
   Object.keys(charts).forEach(k => { charts[k].destroy(); });
   charts = {};
+  clearSession();
   document.getElementById('loginOverlay').style.display = 'flex';
   document.getElementById('mainContent').style.display = 'none';
   document.getElementById('loginPassword').value = '';
@@ -672,6 +758,7 @@ function doLogin() {
   else if (pw === 'Admin@2026') { account = 'admin'; label = 'Admin Mode'; }
   if (account) {
     currentAccount = account;
+    saveSession(account);
     document.getElementById('loginOverlay').style.display = 'none';
     document.getElementById('mainContent').style.display = 'block';
     document.getElementById('sidebarAccountLabel').textContent = label;
@@ -690,6 +777,7 @@ function doLogin() {
       isAdmin = false;
       loadData();
     }
+    startInactivityTracking();
   } else {
     document.getElementById('loginError').style.display = 'block';
   }
@@ -2079,6 +2167,8 @@ function adminSave() {
 document.addEventListener('DOMContentLoaded', () => {
   Chart.register(ChartDataLabels);
   Chart.defaults.plugins.datalabels = { display: false }; // Off by default, enable per chart
+  // Auto-restore session if still valid (< 5 min inactivity)
+  restoreSession();
 });
 </script>
 </body>
